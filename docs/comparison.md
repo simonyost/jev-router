@@ -1,5 +1,8 @@
 # Comparison with other Jev routers
 
+This is a historical comparison of upstream 1.6.0 on 2026-09-25. For this fork's Claude 5.5 defaults,
+installation and verification status, see [model support](models.md).
+
 ## At a glance
 
 | Project | Clients and upstreams | When Jev decides | Claude Code on a Haiku 4.5 tier | Pick it for |

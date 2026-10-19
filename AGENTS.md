@@ -56,7 +56,7 @@ variant.
 | Tests with coverage thresholds | `npm run test:coverage` | ~22s |
 | Full check (the CI gate) | `npm run check` | ~23s |
 | Package smoke test: pack, install like a user, run offline; `-- --git` adds a git install of the last commit (CI) | `npm run test:package` / `npm run test:package -- --git` | ~2s / ~3s |
-| Live check: 3 Anthropic calls, Jev mocked | `npm run test:live` | ~5s |
+| Live check: 4 bounded Anthropic calls, Jev mocked | `npm run test:live` | ~5s |
 | Jev evaluation, live or mocked | `npm run eval` / `npm run eval:mock` | ~30s / ~1s |
 | Run the router | `npm start` | n/a |
 | Run the router with its live view | `npm start -- --ui 4100` | n/a |
@@ -105,7 +105,7 @@ network.
 | Adding a secret pattern | `PATTERNS` in `src/secrets.mjs`, tested with a value built by `fake(...)` |
 | Adding a harness wrapper tag | `WRAPPER_TAGS` in `src/messages.mjs`, with a `humanTurns` unit test |
 | Adding an upstream target | `surfaces.<surface>.<name>` with `url`, `model`, `auth`, `keyEnv` or `clientAuth`, and `trusted`; an untrusted tier needs a `trusted` target; add its prices |
-| A model rejects what a client sends it | Fields: `omit` on its targets in every `config/*.json`. Output size, `role: "system"` messages and betas: the `OUTPUT_LIMITS`, `NATIVE_SYSTEM_MESSAGES` and `REJECTED_BETAS` tables in `src/router.mjs`, which a target's `maxOutputTokens`, `foldSystemMessages` and `omitBetas` override. Add a row to the contracts below |
+| A model rejects what a client sends it | Fields: `omit` on its targets in every `config/*.json`. Output size, `role: "system"` messages and betas: the capability registry in `src/models.mjs`, which a target's `maxOutputTokens`, `foldSystemMessages` and `omitBetas` override. Add a row to the contracts below |
 | Logging | JSON lines through the injected `log`, and into the log file through `appendLogLine` (`src/logfile.mjs`); never prompt text or keys (a test in `test/router.test.mjs` scans every log line those tests write) |
 | Router-raised errors | `fail()` in the client's own error shape; 4xx responses carry `x-should-retry: false` |
 | Writing a test | `test/<area>.test.mjs` with `node:test` and `node:assert/strict`; listen on port 0 through `listen()` in `test/helpers.mjs`; assert call deltas, never totals |
@@ -159,6 +159,9 @@ network.
 
 ## Contracts this code depends on
 
+Current Claude 5.5 IDs, prices, limits and migration constraints were checked against official documentation
+on 2026-10-18; see [docs/models.md](docs/models.md). These changes have mock coverage, without a live credential check.
+
 | Contract | Where verified | Notes |
 | --- | --- | --- |
 | Claude Code gateway protocol: `/v1/messages?beta=true`, `anthropic-*` headers forwarded verbatim, optional `count_tokens`, unmodified error bodies | code.claude.com/docs/en/llm-gateway-protocol | `src/router.mjs` |
@@ -187,7 +190,8 @@ network.
 | `envfile`, `install`, `net`, `service` | `files` |
 | `claude` | `files`, `net` |
 | `jev` | `messages`, `secrets` |
-| `router` | `jev`, `messages`, `secrets`, `sessions`, `usage` |
+| `models` | Node built-ins only |
+| `router` | `jev`, `messages`, `models`, `secrets`, `sessions`, `usage` |
 | `setup` | `claude`, `config`, `envfile`, `files`, `install`, `jev`, `net`, `prompt`, `router` (for `VERSION`), `service` |
 | `uninstall` | `claude`, `config`, `envfile`, `files`, `install`, `net`, `service`, `setup` |
 | `cli` | anything in `src/`; only `bin/jev-router.mjs` imports it |

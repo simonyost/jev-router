@@ -1,5 +1,9 @@
 # Releasing jev-router
 
+This document records upstream release procedures. This fork is installed from
+`github:simonyost/jev-router#main`; `@simonyost/jev-router` is not published to npm.
+Do not run the upstream publishing steps for this fork.
+
 A release is a `vX.Y.Z` tag on `main`. Pushing the tag runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml): it checks and packs the package, publishes the
 Docker Sandboxes kit, creates the GitHub Release, and publishes to npm once that's turned on.
