@@ -90,5 +90,41 @@ test('usage from streaming events retains cache duration details for pricing', (
     ),
   );
   reader.push(Buffer.from('data: {"type":"message_delta","usage":{"output_tokens":3}}\n\n'));
+  reader.push(Buffer.from('data: {"type":"message_stop"}\n\n'));
+  assert.equal(costOf('claude-haiku-5-5', reader.result(), prices), 0.000002);
+});
+
+test('an Anthropic stream without final usage and message_stop has unavailable cost', () => {
+  for (const ending of ['', 'data: {"type":"error","error":{"type":"overloaded_error"}}\n\n', 'data: {"type":"message_stop"}\n\n']) {
+    const reader = new UsageTap('text/event-stream');
+    reader.push(
+      Buffer.from(
+        'data: {"type":"message_start","message":{"model":"claude-haiku-5-5","usage":{"input_tokens":10,"output_tokens":0}}}\n\n',
+      ),
+    );
+    reader.push(Buffer.from(ending));
+    const usage = reader.result();
+    assert.deepEqual(usage, { input: 10, cacheRead: 0, cacheWrite: 0, output: 0 });
+    assert.equal(costOf('claude-haiku-5-5', usage, prices), undefined);
+  }
+});
+
+test('a final Anthropic delta with zero output tokens is complete', () => {
+  const reader = new UsageTap('text/event-stream');
+  reader.push(
+    Buffer.from('data: {"type":"message_start","message":{"model":"claude-haiku-5-5","usage":{"input_tokens":10,"output_tokens":0}}}\n\n'),
+  );
+  reader.push(Buffer.from('data: {"type":"message_delta","usage":{"output_tokens":0}}\n\n'));
+  reader.push(Buffer.from('data: {"type":"message_stop"}\n\n'));
+  assert.equal(costOf('claude-haiku-5-5', reader.result(), prices), 0.000001);
+});
+
+test('a terminal Responses event can still price its reported usage', () => {
+  const reader = new UsageTap('text/event-stream');
+  reader.push(
+    Buffer.from(
+      'data: {"type":"response.incomplete","response":{"model":"claude-haiku-5-5","usage":{"input_tokens":10,"output_tokens":2}}}\n\n',
+    ),
+  );
   assert.equal(costOf('claude-haiku-5-5', reader.result(), prices), 0.000002);
 });

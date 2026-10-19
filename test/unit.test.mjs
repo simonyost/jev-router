@@ -356,7 +356,7 @@ test('config validation rejects a maxSessions the session store cannot honor (re
 test('usage tap reads Anthropic and Responses usage from the stream; costOf prices it', () => {
   const tap = new UsageTap('text/event-stream');
   const sse =
-    'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-5","usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":2000,"cache_creation":{"ephemeral_5m_input_tokens":2000,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}\n\nevent: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":500}}\n\n';
+    'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-5","usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":2000,"cache_creation":{"ephemeral_5m_input_tokens":2000,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}\n\nevent: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":500}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n';
   for (const piece of [sse.slice(0, 57), sse.slice(57, 200), sse.slice(200)]) tap.push(Buffer.from(piece));
   const usage = tap.result();
   assert.deepEqual(usage, { input: 10, cacheRead: 90000, cacheWrite: 2000, output: 500 });

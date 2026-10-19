@@ -62,6 +62,9 @@ export class UsageTap {
     this.raw = {};
     /** @type {string | undefined} */
     this.model = undefined;
+    this.terminal = false;
+    this.terminalResponse = false;
+    this.finalUsage = false;
   }
 
   /**
@@ -96,12 +99,27 @@ export class UsageTap {
     /** @type {UsageEvent} */
     const event = parsed;
     if (event.type === 'message_start') {
+      this.terminal = false;
+      this.terminalResponse = false;
+      this.finalUsage = false;
       this.model = event.message?.model;
       Object.assign(this.raw, event.message?.usage);
-    } else if (event.type === 'message_delta') Object.assign(this.raw, event.usage);
-    else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+    } else if (event.type === 'message_delta') {
+      this.terminal = false;
+      if (tokenCount(event.usage?.output_tokens)) this.finalUsage = true;
+      Object.assign(this.raw, event.usage);
+    } else if (event.type === 'message_stop') {
+      this.terminal = true;
+      this.terminalResponse = false;
+    } else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+      this.terminal = true;
+      this.terminalResponse = true;
       this.model = event.response?.model;
       Object.assign(this.raw, event.response?.usage);
+    } else if (event.type === 'error') {
+      this.terminal = false;
+      this.terminalResponse = false;
+      this.finalUsage = false;
     }
   }
 
@@ -137,7 +155,9 @@ export class UsageTap {
       output: u.output_tokens ?? 0,
     };
     pricingDetails.set(usage, {
-      complete: completeUsage(u, responsesApi, cached, cacheWrite, split),
+      complete:
+        (!this.sse || (this.terminal && (this.terminalResponse || this.finalUsage))) &&
+        completeUsage(u, responsesApi, cached, cacheWrite, split),
       ...(split && {
         cacheWrite5m: split.ephemeral_5m_input_tokens ?? 0,
         cacheWrite1h: split.ephemeral_1h_input_tokens ?? 0,

@@ -141,6 +141,8 @@ jev-router setup --models claude
 
 Use `#<commit-sha>` instead of `#main` to pin a reviewed revision. Setup run from this fork's Git checkout
 installs that checkout when a lasting package is needed, so a feature branch does not resolve to old main.
+Keep that checkout at the same path while using a local-folder installation; use a pinned GitHub commit
+for an installation independent of the checkout.
 For an installed artifact with no recorded source, install hints fall back to this fork's main branch.
 Before replacing an upstream global
 installation, run its `jev-router uninstall` to stop its service and restore its Claude settings, then
