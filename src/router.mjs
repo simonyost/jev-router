@@ -11,6 +11,7 @@ import { once } from 'node:events';
 import http from 'node:http';
 import { applyPolicy, buildState, JevClient } from './jev.mjs';
 import { header, humanTurns, items, tierTag } from './messages.mjs';
+import { modelCapabilities } from './models.mjs';
 import { findSecrets, mayContainSecret, redactBody } from './secrets.mjs';
 import { SessionStore } from './sessions.mjs';
 import { costOf, UsageTap } from './usage.mjs';
@@ -353,6 +354,7 @@ export function createRouter(
       });
 
     const outgoing = prepareBody(body, request.text, target, !countOnly && main ? entry?.anchor : undefined);
+    if (rejectIncompatible(res, outgoing.body, target, surface, shown)) return;
     if (outgoing.redacted) shown['x-jev-redacted'] = String(outgoing.redacted);
     if (outgoing.capped) shown['x-jev-max-tokens'] = String(outgoing.capped);
     const status = await relay(req, res, { id, target, surface, session, shown, signal, startedAt, ...outgoing });
@@ -389,6 +391,13 @@ export function createRouter(
     }
     if (result.broken) log({ ts: ts(), event: 'error', req: id, session, error: result.error ?? 'the upstream stream broke off' });
     const baselineModel = cfg.baselineModel?.[surface];
+    const pricingOptions = {
+      unpricedModifiers:
+        hasUnpricedModifier(body) ||
+        result.broken ||
+        result.aborted ||
+        (result.responseModel !== undefined && result.responseModel !== target.model),
+    };
     log({
       ts: ts(),
       event: 'done',
@@ -405,8 +414,8 @@ export function createRouter(
       error: result.error,
       client_aborted: result.aborted || undefined,
       usage: result.usage,
-      cost_usd: costOf(target.model, result.usage, cfg.prices),
-      baseline_usd: baselineModel ? costOf(baselineModel, result.usage, cfg.prices) : undefined,
+      cost_usd: costOf(target.model, result.usage, cfg.prices, pricingOptions),
+      baseline_usd: baselineModel ? costOf(baselineModel, result.usage, cfg.prices, pricingOptions) : undefined,
     });
     return result.broken ? undefined : result.status;
   }
@@ -688,23 +697,12 @@ function storeDecision(sessions, decision, { host, main, countOnly }) {
 }
 
 /**
- * The output limits of the Claude models the shipped configs use, measured on 2026-09-24. A client
- * sizes `max_tokens` for the model it thinks it talks to: Claude Code asks Opus 5.5 for 128000, which
- * Haiku 4.5 rejects above 64000. A target's `maxOutputTokens` overrides this table.
- * @type {Array<[RegExp, number]>}
- */
-const OUTPUT_LIMITS = [
-  [/^claude-haiku-4-5\b/, 64000],
-  [/^claude-(sonnet-5|opus-5-5|fable-5-1)\b/, 128000],
-];
-
-/**
  * The most output tokens a target's model accepts, when known.
  * @param {Target} target
  * @returns {number | undefined}
  */
 function outputLimit(target) {
-  return target.maxOutputTokens ?? OUTPUT_LIMITS.find(([pattern]) => pattern.test(target.model))?.[1];
+  return target.maxOutputTokens ?? modelCapabilities(target.model)?.maxOutputTokens;
 }
 
 /**
@@ -727,13 +725,6 @@ function capOutput(body, limit) {
   }
   return { body };
 }
-
-/**
- * The models that take `role: "system"` messages inside `messages`. Claude Code sends them to the
- * Claude 5 family it believes it talks to; Haiku 4.5 answers "role 'system' is not supported on this
- * model", so every other model gets them folded (measured on 2026-09-24).
- */
-const NATIVE_SYSTEM_MESSAGES = /^claude-(sonnet-5|opus-5-5|fable-5-1)\b/;
 
 /** @param {string} text */
 const reminder = (text) => (text.includes('<system-reminder>') ? text : `<system-reminder>\n${text}\n</system-reminder>`);
@@ -818,19 +809,115 @@ function foldSystemMessages(body) {
 }
 
 /**
- * Beta flags a model rejects, though a client asks for them for the model it thinks it talks to:
- * Claude Code sends the 1M-context beta once its model has a 1M window, and Haiku 4.5 answers "The
- * long context beta is not yet available for this subscription" (measured on 2026-09-24). A
- * target's `omitBetas` overrides this table.
- * @type {Array<[RegExp, string[]]>}
- */
-const REJECTED_BETAS = [[/^claude-haiku-4-5\b/, ['context-1m-2025-08-07']]];
-
-/**
  * @param {Target} target
  * @returns {string[]}
  */
-const rejectedBetas = (target) => target.omitBetas ?? REJECTED_BETAS.find(([pattern]) => pattern.test(target.model))?.[1] ?? [];
+const rejectedBetas = (target) => target.omitBetas ?? modelCapabilities(target.model)?.omitBetas ?? [];
+
+/**
+ * Check known model incompatibilities without changing the client's intent. Unknown models are
+ * left to their upstream, which retains its own error body and status.
+ * @param {RequestBody} body
+ * @param {Target} target
+ * @returns {string | undefined}
+ */
+function incompatibleRequest(body, target) {
+  const model = modelCapabilities(target.model);
+  if (!model) return undefined;
+  return (
+    incompatibleThinking(body, target.model, model.acceptedThinkingTypes) ??
+    (model.restrictSampling ? incompatibleSampling(body, target.model) : undefined) ??
+    incompatibleToolsAndPrefill(body, target.model, model.forcedTools, model.prefill, model.rejectedToolTypes)
+  );
+}
+
+/**
+ * @param {RequestBody} body
+ * @param {string} id
+ * @param {string[]} accepted
+ * @returns {string | undefined}
+ */
+function incompatibleThinking(body, id, accepted) {
+  const thinking = isRecord(body.thinking) ? body.thinking : undefined;
+  const mode = thinking?.type;
+  if (mode !== undefined && (typeof mode !== 'string' || !accepted.includes(mode)))
+    return `${id} does not support thinking.type ${String(mode)}`;
+  if (mode === 'between_tools') {
+    if (Object.keys(thinking ?? {}).some((key) => key !== 'type')) return `${id} between_tools takes no other fields`;
+    const effort = isRecord(body.output_config) ? body.output_config.effort : undefined;
+    if (effort === 'xhigh' || effort === 'max') return `${id} between_tools requires effort high or below`;
+  }
+  return undefined;
+}
+
+/**
+ * @param {RequestBody} body
+ * @param {string} id
+ * @returns {string | undefined}
+ */
+function incompatibleSampling(body, id) {
+  if (body.temperature !== undefined && body.temperature !== 1) return `${id} does not support non-default temperature`;
+  if (body.top_p !== undefined && body.top_p !== 0.99) return `${id} does not support non-default top_p`;
+  if (body.top_k !== undefined) return `${id} does not support top_k`;
+  if (body.temperature !== undefined && body.top_p !== undefined) return `${id} does not support temperature and top_p together`;
+  return undefined;
+}
+
+/**
+ * @param {RequestBody} body
+ * @param {string} id
+ * @param {boolean} forcedTools
+ * @param {boolean} prefill
+ * @param {string[]} rejectedToolTypes
+ * @returns {string | undefined}
+ */
+function incompatibleToolsAndPrefill(body, id, forcedTools, prefill, rejectedToolTypes) {
+  const choice = isRecord(body.tool_choice) ? body.tool_choice.type : undefined;
+  if (!forcedTools && (choice === 'any' || choice === 'tool')) return `${id} does not support forced tool_choice`;
+  if (!prefill && Array.isArray(body.messages) && body.messages.at(-1)?.role === 'assistant')
+    return `${id} does not support assistant prefill`;
+  if (Array.isArray(body.tools)) {
+    const unsupported = body.tools.find((tool) => isRecord(tool) && rejectedToolTypes.includes(String(tool.type)));
+    if (isRecord(unsupported)) return `${id} does not support ${String(unsupported.type)}; use the current computer toolset`;
+  }
+  return undefined;
+}
+
+/**
+ * @param {ServerResponse} res
+ * @param {RequestBody} body
+ * @param {Target} target
+ * @param {Surface} surface
+ * @param {Record<string, string>} shown
+ * @returns {boolean}
+ */
+function rejectIncompatible(res, body, target, surface, shown) {
+  const reason = surface === 'anthropic' ? incompatibleRequest(body, target) : undefined;
+  if (!reason) return false;
+  fail(res, 400, reason, surface, shown);
+  return true;
+}
+
+/**
+ * Token usage alone cannot price a request with speed, residency, service tier or server-tool
+ * charges. The caller records unknown costs instead of reporting false savings.
+ * @param {RequestBody} body
+ * @returns {boolean}
+ */
+function hasUnpricedModifier(body) {
+  if (
+    body.speed === 'fast' ||
+    (body.inference_geo && body.inference_geo !== 'global') ||
+    (body.service_tier && body.service_tier !== 'auto' && body.service_tier !== 'standard')
+  )
+    return true;
+  return (
+    Array.isArray(body.tools) &&
+    body.tools.some(
+      (tool) => isRecord(tool) && typeof tool.type === 'string' && /^(web_search|web_fetch|code_execution|browser)/.test(tool.type),
+    )
+  );
+}
 
 /**
  * The body a target gets: the model replaced, reasoning another provider signed dropped, secrets
@@ -849,7 +936,7 @@ function prepareBody(body, text, target, anchor) {
   outgoing = omitFields({ ...outgoing, model: target.model }, target.omit);
   if (!target.trusted) delete outgoing.metadata;
   const capped = capOutput(outgoing, outputLimit(target));
-  const fold = target.foldSystemMessages ?? !NATIVE_SYSTEM_MESSAGES.test(target.model);
+  const fold = target.foldSystemMessages ?? !modelCapabilities(target.model)?.systemMessages;
   const folded = fold ? foldSystemMessages(capped.body) : { body: capped.body };
   return { body: folded.body, redacted, capped: capped.capped, folded: folded.folded };
 }
@@ -933,7 +1020,8 @@ function isJsonObject(value) {
  * @param {Record<string, string>} shown the x-jev-* headers for the client
  * @param {AbortSignal} signal
  * @param {Env} env
- * @returns {Promise<{ status: number, bytes: number, sha256: string, usage: Usage | undefined, aborted: boolean, broken: boolean, error?: string }>}
+ * @returns {Promise<{ status: number, bytes: number, sha256: string, usage: Usage | undefined, responseModel?: string,
+ *   aborted: boolean, broken: boolean, error?: string }>}
  */
 async function forward(req, res, target, body, shown, signal, env) {
   const upstream = await fetch(target.url + req.url, {
@@ -975,6 +1063,7 @@ async function forward(req, res, target, body, shown, signal, env) {
     bytes,
     sha256: hash.digest('hex'),
     usage: tap.result(),
+    responseModel: tap.model,
     aborted: signal.aborted,
     broken: Boolean(broke),
     error,
@@ -1186,6 +1275,14 @@ export function describeConfig(cfg) {
 }
 
 /**
+ * Whether an unpriced response contributes to the successful-response count. Older logs omit status.
+ * @param {number | undefined} status
+ */
+function successfulResponse(status) {
+  return status === undefined || (status >= 200 && status < 300);
+}
+
+/**
  * `jev-router report [log.jsonl]`: requests, spend, savings against the baseline, and Jev health.
  * @param {Iterable<string>} lines the log's lines; lines that aren't log entries are skipped
  * @returns {Report}
@@ -1203,6 +1300,7 @@ export function report(lines) {
   let jevInput = 0;
   let cost = 0;
   let baseline = 0;
+  let saved = 0;
   let unpriced = 0;
   for (const line of lines) {
     const e = parseEntry(line);
@@ -1220,8 +1318,9 @@ export function report(lines) {
       const m = models.get(e.model) ?? { requests: 0, cost_usd: 0, input: 0, cache_read: 0, output: 0 };
       tally(m, e);
       if (e.cost_usd !== undefined) cost += e.cost_usd;
-      else if (e.usage) unpriced += 1;
-      baseline += e.baseline_usd ?? e.cost_usd ?? 0;
+      else if (successfulResponse(e.status)) unpriced += 1;
+      if (e.baseline_usd !== undefined) baseline += e.baseline_usd;
+      if (e.cost_usd !== undefined && e.baseline_usd !== undefined) saved += e.baseline_usd - e.cost_usd;
       models.set(e.model, m);
     }
   }
@@ -1236,7 +1335,7 @@ export function report(lines) {
     models: Object.fromEntries([...models].map(([m, v]) => [m, { ...v, cost_usd: round(v.cost_usd) }])),
     cost_usd: round(cost),
     baseline_usd: round(baseline),
-    saved_usd: round(baseline - cost),
+    saved_usd: round(saved),
     unpriced_responses: unpriced,
     jev: {
       calls: jevCalls,

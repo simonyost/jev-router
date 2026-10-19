@@ -9,14 +9,14 @@
 # install commands replace @PATH@ below with the directories that hold jev-router and node on your
 # PATH. Run them again after you reinstall jev-router under another Node.js, for example with nvm.
 #
-# Install by hand, after `npm install -g github:dirien/jev-router#semver:^1`:
+# Install by hand, after `npm install -g github:simonyost/jev-router#main`:
 #
 #   command -v jev-router node                     # both must print a path
 #   jev-router init                                # writes ~/.config/jev-router/config.json
 #   mkdir -p ~/.config/jev-router ~/.config/systemd/user
 #   touch ~/.config/jev-router/env && chmod 600 ~/.config/jev-router/env
 #   # Put your keys in ~/.config/jev-router/env, one KEY=value per line: TYPESAFE_API_KEY, OLLAMA_API_KEY, ...
-#   unit="$(npm root -g)/@ediri/jev-router/examples/service/systemd/jev-router.service"
+#   unit="$(npm root -g)/@simonyost/jev-router/examples/service/systemd/jev-router.service"
 #   path="$(dirname "$(command -v jev-router)"):$(dirname "$(command -v node)"):/usr/bin:/bin"
 #   sed "s|@PATH@|$path|" "$unit" > ~/.config/systemd/user/jev-router.service
 #   systemctl --user daemon-reload

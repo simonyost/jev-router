@@ -44,6 +44,7 @@ import {
 } from './files.mjs';
 import {
   commandVersion,
+  FORMER_PACKAGE,
   globalCommand,
   installedCommand,
   LEGACY_PACKAGE,
@@ -97,9 +98,9 @@ import {
 
 /** @type {Record<Models, { what: string, short: string, needs: string }>} */
 const MODELS = {
-  claude: { what: 'Claude only: Haiku 4.5, Sonnet 5 and Opus 5.5', short: 'Claude only', needs: 'a Jev key' },
+  claude: { what: 'Claude only: Haiku 5.5, Sonnet 5.5 and Opus 5.5', short: 'Claude only', needs: 'a Jev key' },
   fable: {
-    what: 'Claude only, with Fable 5.1 for deep work: Haiku 4.5, Sonnet 5, Opus 5.5 and Fable 5.1',
+    what: 'Claude only, with Fable 5.1 for deep work: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1',
     short: 'Claude with Fable 5.1',
     needs: 'a Jev key',
   },
@@ -844,7 +845,7 @@ async function serviceCommand(plan, env) {
   );
   if (!result.ok && legacyInstall(env))
     say(
-      `jev-router 1.4.0 and older were called ${LEGACY_PACKAGE}, and npm won't replace their command. Remove it first:\n  npm uninstall -g ${LEGACY_PACKAGE}\n`,
+      `An existing jev-router install can own the command npm won't replace (older releases used ${LEGACY_PACKAGE}; the upstream package used ${FORMER_PACKAGE}). Remove the existing package first:\n  npm uninstall -g ${LEGACY_PACKAGE}\n  npm uninstall -g ${FORMER_PACKAGE}\n`,
     );
   else
     say(

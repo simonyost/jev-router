@@ -495,6 +495,7 @@ test('serve logs JSON to stdout and the logFile, reloads on SIGHUP, and drains o
   mkdirSync(missingDir);
   assert.equal((await ask(url)).status, 200);
   await waitFor(() => serving.out.stderr.includes(`the log file ${unwritable} can be written again`), 'the recovery note');
+  await waitFor(() => logEvents(readFileSync(unwritable, 'utf8')).includes('done'), 'the recovered log completion');
   assert.deepEqual(logEvents(readFileSync(unwritable, 'utf8')), ['route', 'done']);
   serving.child.stdout.destroy();
   for (let i = 0; i < 3; i += 1) assert.equal((await ask(url)).status, 200);
@@ -795,7 +796,7 @@ test('launch claude starts a router for the session, hands the agent its args an
 
   assert.equal(agent.request.status, 200);
   assert.equal(upstream.calls.length, 1);
-  assert.equal(upstream.calls[0].body.model, 'claude-sonnet-5');
+  assert.equal(upstream.calls[0].body.model, 'claude-sonnet-5-5');
   assert.equal(upstream.calls[0].headers['x-api-key'], CLIENT_KEY, "the agent's own login goes through");
   const log = join(box.state, 'jev-router', 'router.log');
   assert.deepEqual(logEvents(readFileSync(log, 'utf8')), ['config', 'warning', 'route', 'done'], 'the router logs to its file');

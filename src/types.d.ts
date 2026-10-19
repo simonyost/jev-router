@@ -64,6 +64,17 @@ export interface Price {
   out: number;
   cacheRead?: number;
   cacheWrite?: number;
+  /** One-hour cache creation; omitted when the duration cannot be priced. */
+  cacheWrite1h?: number;
+  /** All tokens use these rates when total input, including cached tokens, exceeds the threshold. */
+  longContext?: {
+    aboveInputTokens: number;
+    in: number;
+    out: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    cacheWrite1h?: number;
+  };
 }
 
 /** How Jev's probabilities become a tier. */
@@ -511,7 +522,7 @@ export interface Report {
   cost_usd: number;
   baseline_usd: number;
   saved_usd: number;
-  /** Responses with usage but no price for their model. */
+  /** Successful responses without a usable cost estimate, including missing usage. */
   unpriced_responses: number;
   jev: {
     calls: number;

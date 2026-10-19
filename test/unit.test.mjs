@@ -356,7 +356,7 @@ test('config validation rejects a maxSessions the session store cannot honor (re
 test('usage tap reads Anthropic and Responses usage from the stream; costOf prices it', () => {
   const tap = new UsageTap('text/event-stream');
   const sse =
-    'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-5","usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":2000,"output_tokens":1}}}\n\nevent: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":500}}\n\n';
+    'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-5","usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":2000,"cache_creation":{"ephemeral_5m_input_tokens":2000,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}\n\nevent: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":500}}\n\n';
   for (const piece of [sse.slice(0, 57), sse.slice(57, 200), sse.slice(200)]) tap.push(Buffer.from(piece));
   const usage = tap.result();
   assert.deepEqual(usage, { input: 10, cacheRead: 90000, cacheWrite: 2000, output: 500 });
@@ -846,7 +846,13 @@ test('the usage tap reads JSON bodies and skips junk; costOf falls back to undat
   const anthropicJson = new UsageTap('application/json');
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
-    usage: { input_tokens: 100, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100, output_tokens: 10 },
+    usage: {
+      input_tokens: 100,
+      cache_read_input_tokens: 1000,
+      cache_creation_input_tokens: 100,
+      cache_creation: { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 0 },
+      output_tokens: 10,
+    },
   });
   for (const part of [body.slice(0, 20), body.slice(20)]) anthropicJson.push(Buffer.from(part));
   const usage = anthropicJson.result();
@@ -880,7 +886,7 @@ test('the usage tap reads JSON bodies and skips junk; costOf falls back to undat
   assert.equal(costOf('glm-5.3-flash', undefined, cfg.prices), undefined);
 });
 
-test('report counts unpriced responses and uses the cost as baseline when there is none', () => {
+test('report counts unpriced responses and omits unknown baselines', () => {
   const r = report(
     [
       { event: 'done', session: 's', model: 'mystery-model', usage: { input: 5, cacheRead: 0, cacheWrite: 0, output: 1 } },
@@ -890,7 +896,7 @@ test('report counts unpriced responses and uses the cost as baseline when there 
     ].map((e) => JSON.stringify(e)),
   );
   assert.equal(r.unpriced_responses, 1);
-  assert.equal(r.baseline_usd, 0.001);
+  assert.equal(r.baseline_usd, 0);
   assert.equal(r.saved_usd, 0);
   assert.deepEqual(r.models['mystery-model'], { requests: 1, cost_usd: 0, input: 5, cache_read: 0, output: 1 });
   assert.deepEqual(r.jev, { calls: 0, fallbacks: 0, fallback_rate: 0, p50_ms: null, p95_ms: null, cost_usd: 0 });
@@ -1167,9 +1173,9 @@ test('questions: on a terminal a secret is typed in raw mode without an echo, an
 });
 
 test('install: npx runs are recognized by where the package really is, and npm gets the spec npx recorded', () => {
-  const root = mkdtempSync(`${tmpdir()}/jev-npx-`);
+  const root = realpathSync(mkdtempSync(`${tmpdir()}/jev-npx-`));
   const npx = `${root}/cache/_npx/1a2b3c`;
-  const bin = `${npx}/node_modules/@ediri/jev-router/bin`;
+  const bin = `${npx}/node_modules/@simonyost/jev-router/bin`;
   mkdirSync(bin, { recursive: true });
   writeFileSync(`${bin}/jev-router.mjs`, '');
   mkdirSync(`${npx}/node_modules/.bin`);
@@ -1177,16 +1183,24 @@ test('install: npx runs are recognized by where the package really is, and npm g
   assert.equal(npxDirOf(`${npx}/node_modules/.bin/jev-router`), npx);
   assert.equal(npxDirOf(`${root}/elsewhere/jev-router`), undefined);
 
-  assert.deepEqual(installSpec(undefined, npx, '1.5.0'), { spec: '@ediri/jev-router@1.5.0', registry: true }, "when it can't tell");
-  assert.deepEqual(installSpec('^1.5.0', npx, '1.5.0'), { spec: '@ediri/jev-router@1.5.0', registry: true });
-  assert.deepEqual(installSpec('latest', npx, '1.5.0'), { spec: '@ediri/jev-router@1.5.0', registry: true });
+  assert.deepEqual(
+    installSpec(undefined, npx, '1.5.0'),
+    { spec: 'github:simonyost/jev-router#main', registry: false },
+    "when it can't tell",
+  );
+  assert.deepEqual(installSpec('^1.5.0', npx, '1.5.0'), { spec: 'github:simonyost/jev-router#main', registry: false });
+  assert.deepEqual(installSpec('latest', npx, '1.5.0'), { spec: 'github:simonyost/jev-router#main', registry: false });
   for (const git of [
     'github:dirien/jev-router',
     'github:dirien/jev-router#semver:^1',
     'git+https://github.com/dirien/jev-router.git',
     'dirien/jev-router#v1.5.0',
   ])
-    assert.deepEqual(installSpec(git, npx, '1.5.0'), { spec: git, registry: false }, git);
+    assert.deepEqual(installSpec(git, npx, '1.5.0'), { spec: 'github:simonyost/jev-router#main', registry: false }, git);
+  assert.deepEqual(installSpec('github:simonyost/jev-router#feature', npx, '1.5.0'), {
+    spec: 'github:simonyost/jev-router#feature',
+    registry: false,
+  });
   assert.deepEqual(installSpec('file:../../../ediri-jev-router-1.5.0.tgz', npx, '1.5.0'), {
     spec: `${root}/ediri-jev-router-1.5.0.tgz`,
     registry: false,
@@ -1195,14 +1209,18 @@ test('install: npx runs are recognized by where the package really is, and npm g
   writeFileSync(`${npx}/package.json`, JSON.stringify({ dependencies: { '@ediri/jev-router': 'github:dirien/jev-router#semver:^1' } }));
   assert.deepEqual(origin('1.5.0', `${bin}/jev-router.mjs`), {
     npx,
-    spec: 'github:dirien/jev-router#semver:^1',
-    npxCommand: "npx 'github:dirien/jev-router#semver:^1'",
+    spec: 'github:simonyost/jev-router#main',
+    npxCommand: "npx 'github:simonyost/jev-router#main'",
   });
   writeFileSync(`${npx}/package.json`, JSON.stringify({ dependencies: { '@ediri/jev-router': '*' } }));
-  assert.deepEqual(origin('1.5.0', `${bin}/jev-router.mjs`), { npx, spec: '@ediri/jev-router@1.5.0', npxCommand: 'npx @ediri/jev-router' });
+  assert.deepEqual(origin('1.5.0', `${bin}/jev-router.mjs`), {
+    npx,
+    spec: 'github:simonyost/jev-router#main',
+    npxCommand: "npx 'github:simonyost/jev-router#main'",
+  });
   writeFileSync(`${npx}/package.json`, '{ not json');
-  assert.equal(origin('1.5.0', `${bin}/jev-router.mjs`).spec, '@ediri/jev-router@1.5.0');
-  assert.deepEqual(origin('1.5.0', `${root}/clone/bin/jev-router.mjs`), { spec: '@ediri/jev-router@1.5.0' }, 'not npx');
+  assert.equal(origin('1.5.0', `${bin}/jev-router.mjs`).spec, 'github:simonyost/jev-router#main');
+  assert.deepEqual(origin('1.5.0', `${root}/clone/bin/jev-router.mjs`), { spec: 'github:simonyost/jev-router#main' }, 'not npx');
 });
 
 test('the package name and version in the code match package.json, and a jev-router command says its version', () => {

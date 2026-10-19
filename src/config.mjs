@@ -105,6 +105,7 @@ export function validateConfig(input, env = process.env) {
   cfg.modelPins ??= {};
   for (const [family, tier] of Object.entries(cfg.modelPins)) need(tiers.has(tier), `modelPins.${family} must be one of tiers`);
   cfg.prices ??= {};
+  checkPrices(cfg.prices, need);
 
   if (problems.length) throw new Error(`Invalid router config:\n  - ${problems.join('\n  - ')}`);
   return /** @type {Config} */ (cfg);
@@ -229,6 +230,48 @@ function checkTarget(target, where, need) {
     target.omitBetas === undefined || (Array.isArray(target.omitBetas) && target.omitBetas.every((b) => typeof b === 'string')),
     `${where}.omitBetas must be a list of beta names`,
   );
+}
+
+/**
+ * Validate prices before reporting estimates; negative or incomplete rates must never imply savings.
+ * @param {unknown} prices
+ * @param {Need} need
+ */
+function checkPrices(prices, need) {
+  if (!prices || typeof prices !== 'object' || Array.isArray(prices)) {
+    need(false, 'prices must be an object of model rates');
+    return;
+  }
+  for (const [model, value] of Object.entries(prices)) {
+    const where = `prices.${model}`;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      need(false, `${where} must contain non-negative finite in and out rates`);
+      continue;
+    }
+    checkRates(value, where, need);
+    if (value.longContext !== undefined) {
+      const long = value.longContext;
+      if (!long || typeof long !== 'object' || Array.isArray(long)) {
+        need(false, `${where}.longContext must contain aboveInputTokens and rates`);
+        continue;
+      }
+      need(isCount(long.aboveInputTokens, 1), `${where}.longContext.aboveInputTokens must be a positive whole number`);
+      checkRates(long, `${where}.longContext`, need);
+    }
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} rates
+ * @param {string} where
+ * @param {Need} need
+ */
+function checkRates(rates, where, need) {
+  for (const key of ['in', 'out', 'cacheRead', 'cacheWrite', 'cacheWrite1h']) {
+    const value = rates[key];
+    if (value === undefined && key !== 'in' && key !== 'out') continue;
+    need(typeof value === 'number' && Number.isFinite(value) && value >= 0, `${where}.${key} must be a non-negative finite rate`);
+  }
 }
 
 /**

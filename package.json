@@ -1,5 +1,5 @@
 {
-  "name": "@ediri/jev-router",
+  "name": "@simonyost/jev-router",
   "version": "1.6.0",
   "description": "Pass-through model router for Claude Code and Codex CLI that picks a model tier per human turn with Jev, TypeSafe AI's decision model",
   "keywords": [
@@ -15,15 +15,15 @@
     "proxy",
     "cli"
   ],
-  "homepage": "https://github.com/dirien/jev-router#readme",
+  "homepage": "https://github.com/simonyost/jev-router#readme",
   "bugs": {
-    "url": "https://github.com/dirien/jev-router/issues"
+    "url": "https://github.com/simonyost/jev-router/issues"
   },
   "license": "Apache-2.0",
   "author": "Engin Diri",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dirien/jev-router.git"
+    "url": "git+https://github.com/simonyost/jev-router.git"
   },
   "type": "module",
   "engines": {
