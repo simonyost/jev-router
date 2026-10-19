@@ -57,6 +57,11 @@ test('pricing is unavailable for incomplete or ambiguous usage', () => {
   assert.equal(costOf('claude-haiku-5-5', missingOutput, prices), undefined);
   const unknownDuration = tap({ input_tokens: 20, cache_creation_input_tokens: 10, output_tokens: 2 });
   assert.equal(costOf('claude-haiku-5-5', unknownDuration, prices), undefined);
+  assert.equal(
+    costOf('claude-haiku-5-5', unknownDuration, { 'claude-haiku-5-5': { in: 0.1, out: 0.5, cacheWrite: 0.125 } }),
+    undefined,
+    'unknown duration stays unpriced even when no one-hour rate is configured',
+  );
   const inconsistent = tap({
     input_tokens: 20,
     cache_creation_input_tokens: 10,

@@ -78,7 +78,7 @@ the router back out of Claude Code's settings.
 - **Check it:** `jev-router doctor` lists the config, the keys, the service, and whether the router answers.
 - **Watch it:** open <http://127.0.0.1:4100>. Each message you write shows up with the model the router picked, and
   why.
-- **Upgrade:** `npx github:simonyost/jev-router#main setup` installs the newest version and restarts the router.
+- **Upgrade:** reinstall globally, then run setup: `npm install -g github:simonyost/jev-router#main && jev-router setup`.
 - **Undo it:** `jev-router uninstall` stops the router and takes setup's changes back out of Claude Code's settings.
   It keeps your config, keys and logs, and prints the command that deletes them.
 

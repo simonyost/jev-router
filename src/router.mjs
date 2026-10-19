@@ -354,7 +354,10 @@ export function createRouter(
       });
 
     const outgoing = prepareBody(body, request.text, target, !countOnly && main ? entry?.anchor : undefined);
-    if (rejectIncompatible(res, outgoing.body, target, surface, shown)) return;
+    if (rejectIncompatible(res, outgoing.body, target, surface, shown)) {
+      log({ ts: new Date().toISOString(), event: 'done', req: id, session, status: 400, ms: elapsed(startedAt) });
+      return;
+    }
     if (outgoing.redacted) shown['x-jev-redacted'] = String(outgoing.redacted);
     if (outgoing.capped) shown['x-jev-max-tokens'] = String(outgoing.capped);
     const status = await relay(req, res, { id, target, surface, session, shown, signal, startedAt, ...outgoing });
@@ -391,12 +394,16 @@ export function createRouter(
     }
     if (result.broken) log({ ts: ts(), event: 'error', req: id, session, error: result.error ?? 'the upstream stream broke off' });
     const baselineModel = cfg.baselineModel?.[surface];
+    const targetCapabilities = modelCapabilities(target.model);
+    const responseCapabilities = result.responseModel ? modelCapabilities(result.responseModel) : undefined;
     const pricingOptions = {
       unpricedModifiers:
         hasUnpricedModifier(body) ||
         result.broken ||
         result.aborted ||
-        (result.responseModel !== undefined && result.responseModel !== target.model),
+        (result.responseModel !== undefined &&
+          result.responseModel !== target.model &&
+          (!targetCapabilities || targetCapabilities !== responseCapabilities)),
     };
     log({
       ts: ts(),

@@ -71,6 +71,25 @@ test('an upstream package with the same version is not reused as the fork instal
   }
 });
 
+test('a linked upstream package is not reused as the fork installation', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jev-linked-upstream-command-'));
+  try {
+    const checkout = join(root, 'checkout');
+    const bin = join(checkout, 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: FORMER_PACKAGE, version: '1.6.0' }));
+    const command = join(bin, 'jev-router');
+    writeFileSync(command, '#!/bin/sh\n');
+    chmodSync(command, 0o755);
+    const globalBin = join(root, 'global', 'bin');
+    mkdirSync(globalBin, { recursive: true });
+    symlinkSync(command, join(globalBin, 'jev-router'));
+    assert.equal(installedCommand({ PATH: globalBin }), undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('npm prefix fallback also rejects an upstream package command', () => {
   const root = mkdtempSync(join(tmpdir(), 'jev-upstream-prefix-'));
   try {

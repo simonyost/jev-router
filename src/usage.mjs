@@ -184,7 +184,7 @@ export function costOf(model, usage, prices, options = {}) {
   if (details && !details.complete) return undefined;
   const totalInput = usage.input + usage.cacheRead + usage.cacheWrite;
   const rate = p.longContext && totalInput > p.longContext.aboveInputTokens ? p.longContext : p;
-  if (usage.cacheWrite && rate.cacheWrite1h !== undefined && !details?.cacheWrite5m && !details?.cacheWrite1h) return undefined;
+  if (usage.cacheWrite && details && details.cacheWrite5m === undefined && details.cacheWrite1h === undefined) return undefined;
   const cacheWrite5m = details?.cacheWrite5m ?? usage.cacheWrite;
   const cacheWrite1h = details?.cacheWrite1h ?? 0;
   if (cacheWrite1h && rate.cacheWrite1h === undefined) return undefined;

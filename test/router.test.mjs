@@ -120,18 +120,19 @@ before(async () => {
     if (call.url.startsWith('/v1/messages/count_tokens')) return json(res, 200, { input_tokens: 42 });
     const refusal = apiRefusal(call);
     if (refusal) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: refusal } });
+    const responseModel = String(call.headers['x-test-response-model'] ?? call.body.model);
     if (!call.body.stream)
       return json(res, 200, {
         id: 'msg',
         type: 'message',
         role: 'assistant',
-        model: call.body.model,
+        model: responseModel,
         content: [{ type: 'text', text: 'ok' }],
         usage: { input_tokens: 10, output_tokens: 1 },
       });
     const gap = Number(call.headers['x-test-chunk-gap-ms'] ?? 0);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'request-id': 'req_mock_sse', 'retry-after': '7' });
-    const bytes = anthropicSseWithUsage(call.body.model);
+    const bytes = anthropicSseWithUsage(responseModel);
     for (const piece of [bytes.subarray(0, 50), bytes.subarray(50, 300), bytes.subarray(300)]) {
       res.write(piece);
       if (gap) await sleep(gap);
@@ -927,7 +928,7 @@ test("a target's omit list removes nested fields and keeps their siblings", asyn
 });
 
 test('current Claude targets preserve adaptive thinking and reject incompatible client intent', async () => {
-  const { url } = await startRouter();
+  const { url, done, logs } = await startRouter();
   const headers = { ...claudeCodeHeaders('s-current'), 'x-jev-tier': 'frontier' };
   const base = cc('s-current', 'Investigate the parser');
   const adaptive = await delta(() =>
@@ -952,6 +953,9 @@ test('current Claude targets preserve adaptive thinking and reject incompatible 
     assert.equal(rejected.result.status, 400, name);
     assert.equal(rejected.result.headers.get('x-should-retry'), 'false', name);
     assert.equal(rejected.anthropic.length, 0, name);
+    const route = logs.filter((entry) => entry.event === 'route').at(-1);
+    assert.equal(done().at(-1)?.status, 400, `${name} has a terminal log event`);
+    assert.equal(done().at(-1)?.req, route?.req, `${name} completion is correlated`);
   }
   const sonnetHeaders = { ...claudeCodeHeaders('s-sonnet-thinking'), 'x-jev-tier': 'balanced' };
   const sonnetBase = cc('s-sonnet-thinking', 'Summarize this file');
@@ -963,6 +967,38 @@ test('current Claude targets preserve adaptive thinking and reject incompatible 
   );
   assert.equal(between.result.status, 200);
   assert.deepEqual(between.anthropic[0].body.thinking, { type: 'between_tools' });
+});
+
+test('recognized dated Haiku model responses retain estimates but different response models do not', async () => {
+  const cfg = testConfig();
+  const targets = cfg.surfaces.anthropic;
+  assert.ok(targets);
+  targets.balanced.model = 'claude-haiku-4-5';
+  const { url, done, logs } = await startRouter({ cfg });
+  const aliasHeaders = {
+    ...claudeCodeHeaders('s-haiku-alias'),
+    'x-jev-tier': 'balanced',
+    'x-test-response-model': 'claude-haiku-4-5-20251001',
+  };
+  const alias = await delta(() => post(url, '/v1/messages', cc('s-haiku-alias', 'Summarize this file'), aliasHeaders));
+  assert.equal(alias.result.status, 200);
+  const aliasRoute = logs.filter((entry) => entry.event === 'route').at(-1);
+  for (let i = 0; i < 50 && !done().some((entry) => entry.req === aliasRoute?.req); i += 1) await sleep(10);
+  const aliasDone = done().find((entry) => entry.req === aliasRoute?.req);
+  assert.equal(aliasDone?.cost_usd, 0.000015);
+  assert.equal(aliasDone?.baseline_usd, 0.00006);
+
+  const mismatchHeaders = {
+    ...claudeCodeHeaders('s-haiku-mismatch'),
+    'x-jev-tier': 'balanced',
+    'x-test-response-model': 'claude-sonnet-5-5',
+  };
+  await delta(() => post(url, '/v1/messages', cc('s-haiku-mismatch', 'Summarize this file'), mismatchHeaders));
+  const mismatchRoute = logs.filter((entry) => entry.event === 'route').at(-1);
+  for (let i = 0; i < 50 && !done().some((entry) => entry.req === mismatchRoute?.req); i += 1) await sleep(10);
+  const mismatchDone = done().find((entry) => entry.req === mismatchRoute?.req);
+  assert.equal(mismatchDone?.cost_usd, undefined);
+  assert.equal(mismatchDone?.baseline_usd, undefined);
 });
 
 test('signed Claude thinking survives same-provider Haiku to Sonnet to Opus escalation', async () => {

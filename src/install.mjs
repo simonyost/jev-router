@@ -3,7 +3,7 @@
 // the commands it suggests are the ones that work for this copy.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { findProgram, packaged, programCandidates, shellQuote } from './files.mjs';
 
 /** The package's name on npm. */
@@ -53,7 +53,27 @@ export function installedCommand(env) {
 /** @param {string} path */
 function foreignPackageCommand(path) {
   const actual = realpath(path);
-  return [LEGACY_PACKAGE, FORMER_PACKAGE].some((name) => actual.includes(`${sep}node_modules${sep}${name.replace('/', sep)}${sep}`));
+  return (
+    [LEGACY_PACKAGE, FORMER_PACKAGE].some((name) => actual.includes(`${sep}node_modules${sep}${name.replace('/', sep)}${sep}`)) ||
+    [LEGACY_PACKAGE, FORMER_PACKAGE].includes(packageName(actual) ?? '')
+  );
+}
+
+/** The name in the nearest package manifest above a command, if any. */
+/** @param {string} path */
+function packageName(path) {
+  let directory = dirname(path);
+  while (true) {
+    try {
+      const name = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).name;
+      if (typeof name === 'string') return name;
+    } catch {
+      // Keep looking when a parent directory has no readable package manifest.
+    }
+    const parent = dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
 }
 
 /**
