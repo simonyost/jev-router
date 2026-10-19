@@ -1068,6 +1068,10 @@ function printReport(args, env) {
   // The router's own log keeps the lines from before its last rotation in <file>.1.
   const files = named === undefined && existsSync(`${file}.1`) ? [`${file}.1`, file] : [file];
   const lines = files.flatMap((path) => readFileSync(path, 'utf8').split('\n'));
+  process.stderr.write(
+    'Token-cost estimates only: totals include known costs; saved_usd compares only responses with both prices.\n' +
+      'Unknown or missing usage is excluded. Estimates are not subscription billing or measured task savings.\n',
+  );
   process.stdout.write(`${JSON.stringify(report(lines), null, 2)}\n`);
   return 0;
 }

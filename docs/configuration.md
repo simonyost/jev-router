@@ -33,8 +33,8 @@ ignored, not rejected, so a misspelled optional key keeps its default without a 
 
 | File | Claude Code | Codex CLI |
 | --- | --- | --- |
-| [`config/default.json`](../config/default.json) | `fast`: Ollama Cloud `glm-5.3-flash`. `balanced` and `trusted`: Anthropic `claude-sonnet-5`. `frontier`: Anthropic `claude-opus-5-5`. `side`: Anthropic `claude-haiku-4-5` | `fast`: Ollama Cloud `glm-5.3-flash`. `balanced`: Ollama Cloud `kimi-k2.7-code`. `frontier`: OpenAI `gpt-6-astra`. `trusted`: OpenAI `gpt-6-sol` |
-| [`config/anthropic-only.json`](../config/anthropic-only.json) | Like the default, except that `fast` is Anthropic `claude-haiku-4-5`, with the same `omit` list as `side`. `jev-router setup` writes this one unless you pick another option | Same as the default |
+| [`config/default.json`](../config/default.json) | `fast`: Ollama Cloud `glm-5.3-flash`. `balanced` and `trusted`: Anthropic `claude-sonnet-5-5`. `frontier`: Anthropic `claude-opus-5-5`. `side`: Anthropic `claude-haiku-5-5` | `fast`: Ollama Cloud `glm-5.3-flash`. `balanced`: Ollama Cloud `kimi-k2.7-code`. `frontier`: OpenAI `gpt-6-astra`. `trusted`: OpenAI `gpt-6-sol` |
+| [`config/anthropic-only.json`](../config/anthropic-only.json) | Like the default, except that `fast` is Anthropic `claude-haiku-5-5`. `jev-router setup` writes this one unless you pick another option | Same as the default |
 | [`config/anthropic-fable.json`](../config/anthropic-fable.json) | Like the Anthropic-only config, plus a fourth tier, `max`: Anthropic `claude-fable-5-1`. Jev's `deep` option, the `fable` model pin and `#max` go there | Same as the default, with `max` on OpenAI `gpt-6-astra`, like `frontier` |
 
 All three share the Jev channels, the rubric, the prices and the policy's thresholds. The Fable config differs from
@@ -201,8 +201,8 @@ without a `trusted` target marked `"trusted": true`.
 | `trusted` | no | none | Trusted with secrets and with the client's full headers |
 | `countTokens` | no | none | `false` answers `count_tokens` with a local 404 instead of forwarding the prompt to a counter with another tokenizer |
 | `omit` | no | A list of strings | Fields to delete from the request body before forwarding. Dotted paths reach nested fields, for example `output_config.effort` |
-| `maxOutputTokens` | no | A positive whole number | The most output tokens the model accepts. A larger `max_tokens` (or `max_output_tokens`) is lowered to it, and a thinking budget stays below it. Defaults to the measured limits of known Claude models: 64000 for `claude-haiku-4-5`, 128000 for `claude-sonnet-5`, `claude-opus-5-5` and `claude-fable-5-1`. Claude Code sizes `max_tokens` for the model it thinks it talks to, so a cheaper tier needs this |
-| `foldSystemMessages` | no | `true` or `false` | Folds `role: "system"` messages inside `messages` into the user message each follows, as `<system-reminder>` text after its tool results; the tools they add (`tool_addition` blocks) join `tools`. Claude Code sends them to the Claude 5 family; Haiku 4.5 answers "role 'system' is not supported on this model". Defaults to `false` for `claude-sonnet-5`, `claude-opus-5-5` and `claude-fable-5-1`, and `true` for every other model |
+| `maxOutputTokens` | no | A positive whole number | The most output tokens the model accepts. A larger `max_tokens` (or `max_output_tokens`) is lowered to it, and a thinking budget stays below it. Defaults to the registry limit: 64000 for historical `claude-haiku-4-5`, 128000 for the known Claude 5/5.5 models. Claude Code sizes `max_tokens` for the model it thinks it talks to, so a cheaper tier needs this |
+| `foldSystemMessages` | no | `true` or `false` | Folds `role: "system"` messages inside `messages` into the user message each follows, as `<system-reminder>` text after its tool results; the tools they add (`tool_addition` blocks) join `tools`. Claude Code sends them to the Claude 5 family; Haiku 4.5 answers "role 'system' is not supported on this model". Defaults to `false` for known Claude 5/5.5 registry entries, and `true` for every other model |
 | `omitBetas` | no | A list of strings | Beta flags to drop from the `anthropic-beta` header. Defaults to `["context-1m-2025-08-07"]` for `claude-haiku-4-5`: Claude Code asks for the 1M-context beta once its own model has a 1M window, and Haiku 4.5 answers "The long context beta is not yet available for this subscription" |
 
 When `keyEnv` names a variable that's set, the router's key wins over the client's credential, so setting
@@ -212,36 +212,37 @@ An untrusted target (`trusted` unset or false) gets less of the request: secrets
 tool output included, only the `content-type`, `accept`, `anthropic-version`, `anthropic-beta`, `openai-beta` and
 `user-agent` headers, and no `metadata`.
 
-The shipped `omit` list, on `surfaces.anthropic.side` and on `fast` in the Anthropic-only config, removes the adaptive
-`thinking`, `output_config.effort` and `context_management` that Claude Code sends for a current model. Haiku 4.5
-rejects them with a 400. Ollama Cloud targets set `countTokens: false`, because Ollama Cloud has no `count_tokens`
-endpoint.
+Current Claude 5.5 targets retain adaptive thinking and effort. Historical Haiku 4.5 compatibility remains
+in the registry for explicitly configured old targets. Known incompatible 5.5 requests are rejected before
+forwarding; forced tools are not silently changed to automatic tools. Ollama Cloud targets set
+`countTokens: false`, because Ollama Cloud has no `count_tokens` endpoint.
+See [model support and history restrictions](models.md#compatibility-and-history).
 
 ## Prices and the baseline
 
 | Key | Default | Validation | Meaning |
 | --- | --- | --- | --- |
-| `prices` | `{}` | none | USD per million tokens per model: `in`, `out`, and optionally `cacheRead` and `cacheWrite`, which fall back to `in` |
+| `prices` | `{}` | An object of finite, non-negative model rates | USD per million tokens per model: required `in`, `out`; optional `cacheRead`, `cacheWrite`, `cacheWrite1h` and `longContext` |
 | `baselineModel` | none | none | Per surface, the model whose prices `baseline_usd` uses. Shipped: `{"anthropic": "claude-opus-5-5"}`, and `{"anthropic": "claude-fable-5-1"}` in the Fable config |
 
-Each `done` log line carries `cost_usd`, the request's usage priced on the model that served it, and `baseline_usd`,
-the same usage priced on the surface's baseline model. `jev-router report` adds them up and shows the difference as
-the savings. A model name with a date suffix (`claude-haiku-4-5-20251001`) falls back to the undated price entry. A
-response from a model without a price counts as `unpriced_responses` in the report.
+Optional `prices.<model>.longContext` contains a positive whole-number `aboveInputTokens` threshold and
+required `in`/`out` replacement rates, with the same optional cache rates. Above the threshold, all tokens
+use those rates. Validation reports `prices must be an object of model rates`,
+`prices.<model> must contain non-negative finite in and out rates`,
+`prices.<model>.<rate> must be a non-negative finite rate`, or
+`prices.<model>.longContext.aboveInputTokens must be a positive whole number` as applicable.
+An invalid context-rate object reports `prices.<model>.longContext must contain aboveInputTokens and rates`.
 
-The shipped prices, per million tokens:
+Each `done` log line keeps its original four usage counts and optional `cost_usd`/`baseline_usd` estimates.
+Cache-duration detail affects calculations in memory without changing the persisted log schema.
+A missing estimate means unknown, not zero. `report` totals known estimates and sums savings only for
+responses with both estimates. Model totals are subtotals; unpriced responses are counted separately.
+A dated model name can fall back to its undated configured price. Existing custom price tables keep working.
 
-| Model | Input | Output | Cache read | Cache write |
-| --- | --- | --- | --- | --- |
-| `claude-haiku-4-5` | $1 | $5 | $0.10 | $1.25 |
-| `claude-sonnet-5` | $2 | $10 | $0.20 | $2.50 |
-| `claude-opus-5-5` | $4 | $20 | $0.20 | $5 |
-| `claude-fable-5-1` | $10 | $50 | $0.25 | $12.50 |
-| `glm-5.3-flash` | $0.15 | $0.50 | $0.03 | same as input |
-| `kimi-k2.7-code` | $0.95 | $4 | $0.19 | same as input |
-
-The OpenAI models have no shipped prices. Add them to `prices` to include Codex's frontier and trusted tiers in the
-ledger.
+Current official rates, context thresholds, cache duration behavior and estimation limits are in
+[model prices](models.md#token-cost-estimates), verified 2026-10-18. Legacy price entries are retained for
+older configs. The OpenAI models have no shipped prices; add verified prices to include Codex's frontier
+and trusted tiers. No savings or task-quality improvement has been measured by this change.
 
 ## Environment variables
 

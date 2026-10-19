@@ -120,18 +120,19 @@ before(async () => {
     if (call.url.startsWith('/v1/messages/count_tokens')) return json(res, 200, { input_tokens: 42 });
     const refusal = apiRefusal(call);
     if (refusal) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: refusal } });
+    const responseModel = String(call.headers['x-test-response-model'] ?? call.body.model);
     if (!call.body.stream)
       return json(res, 200, {
         id: 'msg',
         type: 'message',
         role: 'assistant',
-        model: call.body.model,
+        model: responseModel,
         content: [{ type: 'text', text: 'ok' }],
         usage: { input_tokens: 10, output_tokens: 1 },
       });
     const gap = Number(call.headers['x-test-chunk-gap-ms'] ?? 0);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'request-id': 'req_mock_sse', 'retry-after': '7' });
-    const bytes = anthropicSseWithUsage(call.body.model);
+    const bytes = anthropicSseWithUsage(responseModel);
     for (const piece of [bytes.subarray(0, 50), bytes.subarray(50, 300), bytes.subarray(300)]) {
       res.write(piece);
       if (gap) await sleep(gap);
@@ -175,6 +176,16 @@ function testConfig(patch = {}, base = shipped) {
   ];
   cfg.jev.deadlineMs = 1500;
   return validateConfig({ ...cfg, stateFile: null, ...patch, policy: { ...cfg.policy, ...patch.policy } });
+}
+
+/** A previous, explicitly configured target still uses its historical compatibility rules. */
+function legacyHaikuConfig() {
+  const cfg = testConfig();
+  const side = cfg.surfaces.anthropic?.side;
+  assert.ok(side);
+  side.model = 'claude-haiku-4-5';
+  side.omit = ['thinking', 'output_config.effort', 'context_management'];
+  return cfg;
 }
 
 /** @param {{ cfg?: Config, env?: Env }} [options] */
@@ -347,7 +358,7 @@ test('sticky mode decides once per session', async () => {
     ),
   );
   assert.equal(d.jevA.length, 0);
-  assert.equal(d.anthropic[0].body.model, 'claude-sonnet-5');
+  assert.equal(d.anthropic[0].body.model, 'claude-sonnet-5-5');
   assert.deepEqual(
     routes().map((r) => r.reason),
     ['jev', 'sticky'],
@@ -361,7 +372,7 @@ test('when Jev fails, the session is provisional: default tier now, Jev asked ag
   const first = cc('s-prov', 'Rename foo to bar');
   const d1 = await delta(() => post(url, '/v1/messages', first, ccHeaders('s-prov')));
   assert.equal(d1.result.status, 200);
-  assert.equal(d1.anthropic[0].body.model, 'claude-sonnet-5', 'the default tier serves the turn');
+  assert.equal(d1.anthropic[0].body.model, 'claude-sonnet-5-5', 'the default tier serves the turn');
   assert.equal(d1.jevA.length, 2, 'one retry on a 500');
   assert.equal(d1.jevB.length, 1, 'then the next channel');
   reset(plans.a, { option: 'mechanical', probability: 0.95 });
@@ -405,7 +416,7 @@ test('secrets in a human turn keep the session on trusted upstreams; tags and pi
   const first = cc('s-secret', `Use ${AWS_KEY} in deploy.sh #fast`);
   const d1 = await delta(() => post(url, '/v1/messages', first, ccHeaders('s-secret')));
   assert.equal(d1.ollama.length, 0);
-  assert.equal(d1.anthropic[0].body.model, 'claude-sonnet-5', 'the fast tier is untrusted, so the trusted target serves it');
+  assert.equal(d1.anthropic[0].body.model, 'claude-sonnet-5-5', 'the fast tier is untrusted, so the trusted target serves it');
   assert.equal(d1.jevA.length, 0, 'a tag decides, but it cannot move secrets to an untrusted upstream');
   const second = cc('s-secret', 'now list the files', { history: [...first.messages, { role: 'assistant', content: 'ok' }] });
   const d2 = await delta(() => post(url, '/v1/messages', second, ccHeaders('s-secret', { 'x-jev-tier': 'fast' })));
@@ -436,7 +447,7 @@ test('a secret keeps the session trusted even when sticky mode or a Jev failure 
     const third = cc(s, 'Now list the files again', { history: [...second.messages, { role: 'assistant', content: 'done' }] });
     const d3 = await delta(() => post(url, '/v1/messages', third, ccHeaders(s)));
     assert.equal(d3.ollama.length, 0, `${name}: a clean turn after the secret stays trusted`);
-    assert.equal(d3.anthropic[0].body.model, 'claude-sonnet-5');
+    assert.equal(d3.anthropic[0].body.model, 'claude-sonnet-5-5');
   }
   reset(plans.a);
   reset(plans.b);
@@ -510,9 +521,9 @@ test('background calls, subagents and compaction never ask Jev or move the sessi
   assert.deepEqual(
     routes().map((r) => [r.reason, r.model]),
     [
-      ['side-call', 'claude-haiku-4-5'],
-      ['side-call', 'claude-haiku-4-5'],
-      ['compaction', 'claude-sonnet-5'],
+      ['side-call', 'claude-haiku-5-5'],
+      ['side-call', 'claude-haiku-5-5'],
+      ['compaction', 'claude-sonnet-5-5'],
       ['jev', 'claude-opus-5-5'],
       ['subagent', 'claude-opus-5-5'],
     ],
@@ -532,7 +543,7 @@ test('shell-mode output is not a prompt and never reaches Jev', async () => {
   ];
   const d = await delta(() => post(url, '/v1/messages', bash, ccHeaders('s-bash')));
   assert.equal(d.jevA.length, 0);
-  assert.equal(d.anthropic[0].body.model, 'claude-sonnet-5');
+  assert.equal(d.anthropic[0].body.model, 'claude-sonnet-5-5');
 });
 
 test("switching providers strips only the old provider's reasoning, and only in the main conversation", async () => {
@@ -596,7 +607,7 @@ test('count_tokens follows the session tier and stays local for Ollama', async (
   await post(url, '/v1/messages', cc('s-count', 'Explain this regex'), ccHeaders('s-count'));
   const { model, max_tokens, stream, metadata, ...countBody } = cc('s-count', 'Explain this regex');
   const d = await delta(() =>
-    post(url, '/v1/messages/count_tokens?beta=true', { model: 'claude-sonnet-5', ...countBody }, claudeCodeHeaders('s-count')),
+    post(url, '/v1/messages/count_tokens?beta=true', { model: 'claude-sonnet-5-5', ...countBody }, claudeCodeHeaders('s-count')),
   );
   assert.equal(d.result.status, 404);
   assert.equal(d.ollama.length + d.anthropic.length + d.jevA.length, 0, 'no provider counted an Ollama-bound prompt');
@@ -621,14 +632,14 @@ test('responses stream back byte for byte, unbuffered, with usage and cost in th
     chunks.push(chunk);
   }
   const got = Buffer.concat(chunks);
-  assert.equal(Buffer.compare(got, anthropicSseWithUsage('claude-sonnet-5')), 0);
+  assert.equal(Buffer.compare(got, anthropicSseWithUsage('claude-sonnet-5-5')), 0);
   assert.ok(first !== undefined && first < performance.now() - started - 200, 'the first bytes arrived before the stream ended');
   assert.equal(res.headers.get('retry-after'), '7', 'upstream headers pass through');
   const entry = done().at(-1);
   assert.ok(entry);
   assert.equal(entry.sha256, sha256(got));
   assert.deepEqual(entry.usage, { input: 12, cacheRead: 1000, cacheWrite: 0, output: 9 });
-  assert.equal(entry.cost_usd, 0.000314);
+  assert.equal(entry.cost_usd, 0.000214);
   assert.equal(entry.baseline_usd, 0.000428, 'the same usage on the baseline model (Opus 5.5)');
 });
 
@@ -771,7 +782,7 @@ test('/model in Claude Code pins the matching tier; /healthz reports the router 
     post(
       url,
       '/v1/messages',
-      cc('s-model', 'keep going', { model: 'claude-haiku-4-5', history: [...first.messages, { role: 'assistant', content: 'ok' }] }),
+      cc('s-model', 'keep going', { model: 'claude-haiku-5-5', history: [...first.messages, { role: 'assistant', content: 'ok' }] }),
       ccHeaders('s-model'),
     ),
   );
@@ -830,7 +841,7 @@ test('the Fable config sends deep work, /model fable and #max to Fable 5.1; afte
   const next = cc('s-fable', 'Fix the typo in the README.', { history: [...toolTurn.messages, { role: 'assistant', content: 'Done.' }] });
   const fresh = await delta(() => post(url, '/v1/messages', next, h));
   assert.equal(fresh.result.headers.get('x-jev-reason'), 'jev');
-  assert.equal(fresh.anthropic[0].body.model, 'claude-haiku-4-5');
+  assert.equal(fresh.anthropic[0].body.model, 'claude-haiku-5-5');
 });
 
 test('a client that leaves during the Jev call costs no upstream request', async () => {
@@ -901,9 +912,9 @@ test('server.active counts requests in flight, so a shutdown can wait for them (
 });
 
 test("a target's omit list removes nested fields and keeps their siblings", async () => {
-  const { url } = await startRouter();
+  const { url } = await startRouter({ cfg: legacyHaikuConfig() });
   const body = {
-    ...cc('s-omit', 'Write a 5-word title', { model: 'claude-haiku-4-5' }),
+    ...cc('s-omit', 'Write a 5-word title', { model: 'claude-haiku-5-5' }),
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high', format: 'text' },
     context_management: { edits: [] },
@@ -916,14 +927,132 @@ test("a target's omit list removes nested fields and keeps their siblings", asyn
   assert.deepEqual(sent.output_config, { format: 'text' }, 'only output_config.effort goes');
 });
 
+test('current Claude targets preserve adaptive thinking and reject incompatible client intent', async () => {
+  const { url, done, logs } = await startRouter();
+  const headers = { ...claudeCodeHeaders('s-current'), 'x-jev-tier': 'frontier' };
+  const base = cc('s-current', 'Investigate the parser');
+  const adaptive = await delta(() =>
+    post(url, '/v1/messages', { ...base, thinking: { type: 'adaptive' }, output_config: { effort: 'high' } }, headers),
+  );
+  assert.equal(adaptive.result.status, 200);
+  assert.deepEqual(adaptive.anthropic[0].body.thinking, { type: 'adaptive' });
+  assert.deepEqual(adaptive.anthropic[0].body.output_config, { effort: 'high' });
+
+  /** @type {Array<[string, Record<string, unknown>]>} */
+  const incompatible = [
+    ['manual thinking', { thinking: { type: 'enabled', budget_tokens: 2048 } }],
+    ['disabled thinking', { thinking: { type: 'disabled' } }],
+    ['forced tool use', { tool_choice: { type: 'any' } }],
+    ['sampling', { temperature: 0.3 }],
+    ['top_k including zero', { top_k: 0 }],
+    ['old computer tool', { tools: [{ type: 'computer_20251124', name: 'computer' }] }],
+    ['prefill', { messages: [...base.messages, { role: 'assistant', content: 'The answer is' }] }],
+  ];
+  for (const [name, change] of incompatible) {
+    const rejected = await delta(() => post(url, '/v1/messages', { ...base, ...change }, headers));
+    assert.equal(rejected.result.status, 400, name);
+    assert.equal(rejected.result.headers.get('x-should-retry'), 'false', name);
+    assert.equal(rejected.anthropic.length, 0, name);
+    const route = logs.filter((entry) => entry.event === 'route').at(-1);
+    assert.equal(done().at(-1)?.status, 400, `${name} has a terminal log event`);
+    assert.equal(done().at(-1)?.req, route?.req, `${name} completion is correlated`);
+  }
+  const sonnetHeaders = { ...claudeCodeHeaders('s-sonnet-thinking'), 'x-jev-tier': 'balanced' };
+  const sonnetBase = cc('s-sonnet-thinking', 'Summarize this file');
+  const disabled = await delta(() => post(url, '/v1/messages', { ...sonnetBase, thinking: { type: 'disabled' } }, sonnetHeaders));
+  assert.equal(disabled.result.status, 400);
+  assert.equal(disabled.anthropic.length, 0);
+  const between = await delta(() =>
+    post(url, '/v1/messages', { ...sonnetBase, thinking: { type: 'between_tools' }, output_config: { effort: 'high' } }, sonnetHeaders),
+  );
+  assert.equal(between.result.status, 200);
+  assert.deepEqual(between.anthropic[0].body.thinking, { type: 'between_tools' });
+});
+
+test('recognized dated Haiku model responses retain estimates but different response models do not', async () => {
+  const cfg = testConfig();
+  const targets = cfg.surfaces.anthropic;
+  assert.ok(targets);
+  targets.balanced.model = 'claude-haiku-4-5';
+  const { url, done, logs } = await startRouter({ cfg });
+  const aliasHeaders = {
+    ...claudeCodeHeaders('s-haiku-alias'),
+    'x-jev-tier': 'balanced',
+    'x-test-response-model': 'claude-haiku-4-5-20251001',
+  };
+  const alias = await delta(() => post(url, '/v1/messages', cc('s-haiku-alias', 'Summarize this file'), aliasHeaders));
+  assert.equal(alias.result.status, 200);
+  const aliasRoute = logs.filter((entry) => entry.event === 'route').at(-1);
+  for (let i = 0; i < 50 && !done().some((entry) => entry.req === aliasRoute?.req); i += 1) await sleep(10);
+  const aliasDone = done().find((entry) => entry.req === aliasRoute?.req);
+  assert.equal(aliasDone?.cost_usd, 0.000015);
+  assert.equal(aliasDone?.baseline_usd, 0.00006);
+
+  const mismatchHeaders = {
+    ...claudeCodeHeaders('s-haiku-mismatch'),
+    'x-jev-tier': 'balanced',
+    'x-test-response-model': 'claude-sonnet-5-5',
+  };
+  await delta(() => post(url, '/v1/messages', cc('s-haiku-mismatch', 'Summarize this file'), mismatchHeaders));
+  const mismatchRoute = logs.filter((entry) => entry.event === 'route').at(-1);
+  for (let i = 0; i < 50 && !done().some((entry) => entry.req === mismatchRoute?.req); i += 1) await sleep(10);
+  const mismatchDone = done().find((entry) => entry.req === mismatchRoute?.req);
+  assert.equal(mismatchDone?.cost_usd, undefined);
+  assert.equal(mismatchDone?.baseline_usd, undefined);
+});
+
+test('signed Claude thinking survives same-provider Haiku to Sonnet to Opus escalation', async () => {
+  const { url } = await startRouter({ cfg: testConfig({}, packagedConfig('anthropic-only')) });
+  const id = 's-signed-escalation';
+  const firstBody = cc(id, 'Start by listing the files');
+  const first = await delta(() => post(url, '/v1/messages', firstBody, ccHeaders(id, { 'x-jev-tier': 'fast' })));
+  assert.equal(first.anthropic[0].body.model, 'claude-haiku-5-5');
+  const haikuThinking = { type: 'thinking', thinking: '', signature: 'opaque-haiku-signature' };
+  const haikuHistory = [
+    ...firstBody.messages,
+    { role: 'assistant', content: [haikuThinking, { type: 'tool_use', id: 'toolu_haiku', name: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_haiku', content: 'README.md' }] },
+  ];
+  const secondBody = cc(id, 'Now fix the parser', { history: haikuHistory });
+  const second = await delta(() => post(url, '/v1/messages', secondBody, ccHeaders(id, { 'x-jev-tier': 'balanced' })));
+  assert.equal(second.anthropic[0].body.model, 'claude-sonnet-5-5');
+  assert.deepEqual(second.anthropic[0].body.messages[1].content[0], haikuThinking);
+  const sonnetThinking = { type: 'thinking', thinking: '', signature: 'opaque-sonnet-signature' };
+  const thirdBody = cc(id, 'Design the migration', {
+    history: [...secondBody.messages, { role: 'assistant', content: [sonnetThinking, { type: 'text', text: 'Ready.' }] }],
+  });
+  const third = await delta(() => post(url, '/v1/messages', thirdBody, ccHeaders(id, { 'x-jev-tier': 'frontier' })));
+  assert.equal(third.anthropic[0].body.model, 'claude-opus-5-5');
+  assert.deepEqual(third.anthropic[0].body.messages[1].content[0], haikuThinking);
+  const thirdMessages = /** @type {Array<{ content: unknown[] }>} */ (/** @type {unknown} */ (third.anthropic[0].body.messages));
+  assert.deepEqual(thirdMessages.at(-2)?.content[0], sonnetThinking);
+});
+
+test('a request with an unpriced speed modifier keeps routed and baseline estimates unknown', async () => {
+  const { url, done } = await startRouter();
+  const routed = await delta(() =>
+    post(
+      url,
+      '/v1/messages',
+      { ...cc('s-fast-price', 'Summarize this file'), speed: 'fast', stream: false },
+      { ...claudeCodeHeaders('s-fast-price'), 'x-jev-tier': 'balanced' },
+    ),
+  );
+  assert.equal(routed.result.status, 200);
+  assert.equal(routed.anthropic.length, 1);
+  for (let i = 0; i < 50 && done().length === 0; i += 1) await sleep(10);
+  assert.equal(done().at(-1)?.cost_usd, undefined);
+  assert.equal(done().at(-1)?.baseline_usd, undefined);
+});
+
 test("max_tokens is capped at the target model's output limit, and an upstream error's message is logged", async () => {
   // Claude Code sizes max_tokens for the model it thinks it talks to: 128000 for Opus 5.5.
-  const { url, done } = await startRouter();
+  const { url, done } = await startRouter({ cfg: legacyHaikuConfig() });
   const haiku = await delta(() =>
     post(
       url,
       '/v1/messages',
-      cc('s-cap', 'Write a 5-word title', { model: 'claude-haiku-4-5', maxTokens: 128000 }),
+      cc('s-cap', 'Write a 5-word title', { model: 'claude-haiku-5-5', maxTokens: 128000 }),
       claudeCodeHeaders('s-cap'),
     ),
   );
@@ -945,9 +1074,10 @@ test("max_tokens is capped at the target model's output limit, and an upstream e
   );
 
   // A target's own limit wins, and a thinking budget stays below it.
-  const cfg = testConfig();
+  const cfg = legacyHaikuConfig();
   const targets = cfg.surfaces.anthropic;
   assert.ok(targets);
+  targets.frontier.model = 'claude-haiku-4-5';
   targets.frontier.maxOutputTokens = 2048;
   targets.side.maxOutputTokens = 200000;
   const custom = await startRouter({ cfg });
@@ -970,7 +1100,7 @@ test("max_tokens is capped at the target model's output limit, and an upstream e
     post(
       custom.url,
       '/v1/messages',
-      cc('s-refused', 'Title', { model: 'claude-haiku-4-5', maxTokens: 128000 }),
+      cc('s-refused', 'Title', { model: 'claude-haiku-5-5', maxTokens: 128000 }),
       claudeCodeHeaders('s-refused'),
     ),
   );
@@ -980,12 +1110,12 @@ test("max_tokens is capped at the target model's output limit, and an upstream e
 });
 
 test('mid-conversation system messages are folded for a model that rejects them, and kept for the Claude 5 family', async () => {
-  const { url, done } = await startRouter();
+  const { url, done } = await startRouter({ cfg: legacyHaikuConfig() });
   const toolTurn = claudeCodeToolTurn('s-fold', 'List the files.');
   const system = { role: 'system', content: 'Answer in one word.' };
   const body = {
     ...toolTurn,
-    model: 'claude-haiku-4-5',
+    model: 'claude-haiku-5-5',
     stream: false,
     messages: [...toolTurn.messages, system, { role: 'system', content: [] }],
   };
@@ -1021,7 +1151,7 @@ test('mid-conversation system messages are folded for a model that rejects them,
 });
 
 test("Haiku 4.5 gets no 1M-context beta, and a folded system message's tool additions join the tools", async () => {
-  const { url } = await startRouter();
+  const { url } = await startRouter({ cfg: legacyHaikuConfig() });
   const lookup = { name: 'Lookup', description: 'Look a thing up', input_schema: { type: 'object', properties: {} } };
   const deferred = {
     name: 'Deferred',
@@ -1029,7 +1159,7 @@ test("Haiku 4.5 gets no 1M-context beta, and a folded system message's tool addi
     input_schema: { type: 'object', properties: {} },
     defer_loading: true,
   };
-  const prompt = cc('s-tools', 'Say ok.', { model: 'claude-haiku-4-5' });
+  const prompt = cc('s-tools', 'Say ok.', { model: 'claude-haiku-5-5' });
   const system = {
     role: 'system',
     content: [
@@ -1155,10 +1285,10 @@ test('an upstream whose TLS handshake or DNS lookup fails is a 502 that names th
   );
 });
 
-test('a stream the upstream cuts off is cut off for the client too, and what it cost still reaches the log', async () => {
+test('a stream the upstream cuts off is cut off for the client too, with incomplete cost left unknown', async () => {
   const cutter = await mockServer((_call, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    res.write(anthropicSseWithUsage('claude-sonnet-5').subarray(0, 400)); // message_start, with its usage, and a little more
+    res.write(anthropicSseWithUsage('claude-sonnet-5-5').subarray(0, 400)); // message_start, with its usage, and a little more
     setTimeout(() => res.socket?.destroy(), 30);
   });
   const cfg = testConfig();
@@ -1179,7 +1309,8 @@ test('a stream the upstream cuts off is cut off for the client too, and what it 
   assert.equal(entry.status, 200);
   assert.match(String(entry.error), /^the stream from 127\.0\.0\.1:\d+ broke off after 400 bytes: other side closed \(UND_ERR_SOCKET\)$/);
   assert.deepEqual(entry.usage, { input: 12, cacheRead: 1000, cacheWrite: 0, output: 1 });
-  assert.ok((entry.cost_usd ?? 0) > 0, 'what the broken stream cost is on the ledger');
+  assert.equal(entry.cost_usd, undefined, 'incomplete usage cannot establish a billable cost');
+  assert.equal(entry.baseline_usd, undefined);
   assert.ok(
     logs.some((e) => e.event === 'error' && e.req === entry.req && e.error === entry.error),
     'and an error entry says what happened',
@@ -1246,7 +1377,7 @@ test('without a Jev key every session gets the default tier, and the router says
   const { url, logs, routes } = await startRouter({ env: { TYPESAFE_API_KEY: '', OPENROUTER_API_KEY: '' } });
   const first = cc('s-nojev', 'Design the cache');
   const d1 = await delta(() => post(url, '/v1/messages', first, ccHeaders('s-nojev')));
-  assert.equal(d1.anthropic[0].body.model, 'claude-sonnet-5');
+  assert.equal(d1.anthropic[0].body.model, 'claude-sonnet-5-5');
   const second = cc('s-nojev', 'Now the eviction', { history: [...first.messages, { role: 'assistant', content: 'ok' }] });
   const d2 = await delta(() => post(url, '/v1/messages', second, ccHeaders('s-nojev')));
   assert.equal(d1.jevA.length + d1.jevB.length + d2.jevA.length + d2.jevB.length, 0);

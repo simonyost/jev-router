@@ -48,8 +48,9 @@ const MONO_FONT = `11px ${MONO}`;
  *   el: HTMLElement | undefined, stepsEl: HTMLElement | undefined, moreEl: HTMLElement | undefined }} Group
  * @typedef {{ tier: string, model: string, reason: string, choice: string, live: boolean }} Turn
  * @typedef {{ id: string, surface: string, turns: Turn[], turnCount: number, tier: string, model: string, spend: number,
+ *   priced: number, unpriced: number,
  *   last: number, requests: number }} Session
- * @typedef {{ count: number, spend: number, inflight: number, tier: string }} ModelStat
+ * @typedef {{ count: number, spend: number, priced: number, unpriced: number, inflight: number, tier: string }} ModelStat
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -410,7 +411,18 @@ function freshState() {
     seenOptions: new Set(),
     /** @type {Set<string>} */
     seenTiers: new Set(),
-    totals: { requests: 0, prompts: 0, fallbacks: 0, spend: 0, baseline: 0, priced: 0, jevMs: /** @type {number[]} */ ([]) },
+    totals: {
+      requests: 0,
+      prompts: 0,
+      fallbacks: 0,
+      spend: 0,
+      pairedSpend: 0,
+      pairedBaseline: 0,
+      priced: 0,
+      unpriced: 0,
+      paired: 0,
+      jevMs: /** @type {number[]} */ ([]),
+    },
     synthetic: 0,
   };
 }
@@ -443,7 +455,7 @@ function paint(el, tier) {
 function modelStat(model) {
   let stat = state.models.get(model);
   if (!stat) {
-    stat = { count: 0, spend: 0, inflight: 0, tier: '' };
+    stat = { count: 0, spend: 0, priced: 0, unpriced: 0, inflight: 0, tier: '' };
     state.models.set(model, stat);
   }
   return stat;
@@ -563,6 +575,8 @@ function trackSession(rec) {
       tier: '',
       model: '',
       spend: 0,
+      priced: 0,
+      unpriced: 0,
       last: route.ts,
       requests: 0,
     };
@@ -646,11 +660,25 @@ function applyDone(ev) {
   const cost = ev.cost ?? 0;
   const t = state.totals;
   t.spend += cost;
-  t.baseline += ev.baseline ?? cost;
   if (ev.cost !== undefined) t.priced += 1;
-  if (ev.model) modelStat(ev.model).spend += cost;
+  else t.unpriced += 1;
+  if (ev.cost !== undefined && ev.baseline !== undefined) {
+    t.pairedSpend += ev.cost;
+    t.pairedBaseline += ev.baseline;
+    t.paired += 1;
+  }
+  if (ev.model) {
+    const model = modelStat(ev.model);
+    model.spend += cost;
+    if (ev.cost === undefined) model.unpriced += 1;
+    else model.priced += 1;
+  }
   const session = state.sessions.get(ev.session);
-  if (session) session.spend += cost;
+  if (session) {
+    session.spend += cost;
+    if (ev.cost === undefined) session.unpriced += 1;
+    else session.priced += 1;
+  }
   const rec = ev.req === undefined ? undefined : state.routes.get(ev.req);
   if (rec && !rec.done) {
     rec.done = ev;
@@ -1559,7 +1587,7 @@ function updateLane(lane, session) {
   paint(lane.tier, session.tier);
   paint(lane.li, session.tier);
   lane.model.textContent = session.model ? shortModel(session.model) : '';
-  lane.spend.textContent = money(session.spend);
+  lane.spend.textContent = knownSpend(session);
   const fresh = session.turnCount - lane.turns;
   const start = Math.max(0, session.turns.length - fresh);
   for (const turn of session.turns.slice(start)) {
@@ -1627,16 +1655,22 @@ function savingsTone(saved) {
   return saved > 0 ? 'good' : 'bad';
 }
 
+/** @param {{ spend: number, priced: number, unpriced: number }} value */
+function knownSpend(value) {
+  if (!value.priced) return '–';
+  return `${money(value.spend)}${value.unpriced ? ' partial' : ''}`;
+}
+
 function renderTotals() {
   const t = state.totals;
-  const saved = t.baseline > 0 ? (t.baseline - t.spend) / t.baseline : undefined;
+  const saved = t.pairedBaseline > 0 ? (t.pairedBaseline - t.pairedSpend) / t.pairedBaseline : undefined;
   tile('Requests', String(t.requests), count(state.models.size, 'model'));
   tile('Prompts', String(t.prompts), 'human turns');
   tile('Jev p50', t.jevMs.length ? dur(median(t.jevMs)) : '–', `${t.jevMs.length} answers`);
   tile('Fallbacks', String(t.fallbacks), 'Jev failures', t.fallbacks ? 'bad' : '');
-  tile('Spend', money(t.spend), t.priced ? `baseline ${money(t.baseline)}` : 'no priced calls yet');
-  tile('Saved', saved === undefined ? '–' : pct(saved), 'vs baseline', savingsTone(saved));
-  dom.totalsNote.textContent = t.priced ? `${t.priced} priced calls` : '';
+  tile('Spend', t.priced ? money(t.spend) : '–', t.unpriced ? 'known subtotal; some costs unavailable' : 'known costs');
+  tile('Saved', saved === undefined ? '–' : pct(saved), `${t.paired} comparable calls`, savingsTone(saved));
+  dom.totalsNote.textContent = `${t.priced} priced · ${t.unpriced} unavailable`;
   const rows = [...state.models.entries()].sort((a, b) => b[1].spend - a[1].spend || b[1].count - a[1].count).slice(0, 6);
   const top = Math.max(...rows.map(([, m]) => m.spend), 1e-9);
   dom.mbars.replaceChildren(
@@ -1644,8 +1678,8 @@ function renderTotals() {
       const row = barRow(shortModel(model), false);
       paint(row.row, m.tier);
       row.row.classList.add('chosen');
-      row.value.textContent = money(m.spend);
-      row.row.title = `${model}: ${count(m.count, 'request')}, ${money(m.spend)}`;
+      row.value.textContent = knownSpend(m);
+      row.row.title = `${model}: ${count(m.count, 'request')}, ${m.priced} priced, ${m.unpriced} unavailable`;
       setWidth(row.fill, m.spend / top, false);
       return row.row;
     }),
@@ -2073,8 +2107,8 @@ function setHeat(n, p, active) {
 function modelSub(stat, compact) {
   if (!stat) return 'idle';
   const live = stat.inflight > 0;
-  if (compact) return live ? 'live' : money(stat.spend);
-  return `${stat.count} req · ${live ? 'streaming' : money(stat.spend)}`;
+  if (compact) return live ? 'live' : knownSpend(stat);
+  return `${stat.count} req · ${live ? 'streaming' : knownSpend(stat)}`;
 }
 
 /**

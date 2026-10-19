@@ -7,6 +7,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Reviewed Claude capability registry and model-upgrade guide with official sources and verification dates.
+- Cache-write duration and configurable long-context prices, including Haiku 5.5's 100,000-input-token threshold.
+- Deterministic regression coverage for current model compatibility, pricing and fork installation.
+
+### Changed
+
+- Claude defaults now use Haiku 5.5, Sonnet 5.5 and Opus 5.5. The optional Fable tier and Codex targets remain.
+- Fork installation uses `github:simonyost/jev-router#main` and the `@simonyost/jev-router` package identity,
+  retaining upstream license and attribution. No package publication is required.
+- Reports and the live view distinguish known cost subtotals and paired baseline estimates from unknown costs.
+
+### Fixed
+
+- Preserve Claude thinking history across supported model switches and reject known incompatible requests
+  without silently changing tool-choice semantics.
+- Avoid estimates for incomplete usage, ambiguous cache duration and unsupported billing modifiers.
+
 ## [1.6.0] - 2026-09-25
 
 Fable 5.1 can take Claude Code's hardest work now. Setup offers a third choice of models, Claude with Fable 5.1, which

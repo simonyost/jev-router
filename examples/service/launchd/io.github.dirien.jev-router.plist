@@ -16,14 +16,14 @@
   macOS's login shell is zsh, and nvm and similar version managers set up PATH only in interactive
   shells. Run the install commands again after you reinstall jev-router under another Node.js.
 
-  Install by hand, after "npm install -g github:dirien/jev-router#semver:^1":
+  Install by hand, after "npm install -g github:simonyost/jev-router#main":
 
     command -v jev-router node                   (both must print a path)
     jev-router init                              (writes ~/.config/jev-router/config.json)
     mkdir -p ~/.config/jev-router ~/Library/Logs/jev-router ~/Library/LaunchAgents
     touch ~/.config/jev-router/env && chmod 600 ~/.config/jev-router/env
     (put your keys in ~/.config/jev-router/env, one KEY=value per line: TYPESAFE_API_KEY, ...)
-    plist="$(npm root -g)/@ediri/jev-router/examples/service/launchd/io.github.dirien.jev-router.plist"
+    plist="$(npm root -g)/@simonyost/jev-router/examples/service/launchd/io.github.dirien.jev-router.plist"
     path="$(dirname "$(command -v jev-router)"):$(dirname "$(command -v node)"):/usr/bin:/bin"
     sed -e "s|@HOME@|$HOME|g" -e "s|@PATH@|$path|g" "$plist" > ~/Library/LaunchAgents/io.github.dirien.jev-router.plist
     plutil -lint ~/Library/LaunchAgents/io.github.dirien.jev-router.plist

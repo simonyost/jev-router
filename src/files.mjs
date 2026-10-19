@@ -46,9 +46,18 @@ export const MODEL_CHOICES = ['claude', 'fable', 'ollama'];
  * @type {Readonly<Record<Models, ReadonlyArray<string>>>}
  */
 export const PACKAGED_DIGESTS = Object.freeze({
-  claude: ['4db622bf5f4cba5247a8a22269454a016bd40782a6b933171a8c40c93a39f60f'], // 1.4.0 to 1.6.0
-  fable: ['12eb9ef77f64da817417160b157e4f48789c7d610fb92b0b236254173e826e08'], // 1.6.0
-  ollama: ['b36d54b0047004c93ae3c2b829a3bcedcdb8b7c7a7c4609f2cbdfe0d25b63d45'], // 1.4.0 to 1.6.0
+  claude: [
+    '4db622bf5f4cba5247a8a22269454a016bd40782a6b933171a8c40c93a39f60f',
+    '38ecd609a9282547eb3b036d269035294519d3704d4fac0df264511920e822c8',
+  ],
+  fable: [
+    '12eb9ef77f64da817417160b157e4f48789c7d610fb92b0b236254173e826e08',
+    '4ae3f19102becc6b6585818e7e1204ff2726f54bd69f77f6dc7569e253c9e142',
+  ],
+  ollama: [
+    'b36d54b0047004c93ae3c2b829a3bcedcdb8b7c7a7c4609f2cbdfe0d25b63d45',
+    'e4c0136bcaf433196afbc289be712512c588dfa06e239ea3464453c702bcce70',
+  ],
 });
 
 /**

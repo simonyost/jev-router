@@ -9,7 +9,7 @@ address, `http://127.0.0.1:4000`. [configuration.md](configuration.md) covers th
 `jev-router setup` does all of this for Claude Code, as the README's [Quick start](../README.md#quick-start) shows.
 In order, it:
 
-1. asks which models Claude Code uses: Claude only (Haiku 4.5, Sonnet 5 and Opus 5.5), Claude with Fable 5.1 as a
+1. asks which models Claude Code uses: Claude only (Haiku 5.5, Sonnet 5.5 and Opus 5.5), Claude with Fable 5.1 as a
    fourth tier for deep work, or Ollama Cloud's `glm-5.3-flash` for the `fast` tier and Claude for the rest. It
    doesn't ask when you have a config of your own; when your config is still an unchanged packaged one, Enter keeps it;
 1. asks for the keys that config needs for Claude Code: a Jev key (TypeSafe, or OpenRouter when you press Enter),
@@ -209,7 +209,7 @@ cap on output tokens that `env claude` doesn't set, and commented-out lines for 
 the package:
 
 ```bash
-source "$(npm root -g)/@ediri/jev-router/examples/claude-code.env"
+source "$(npm root -g)/@simonyost/jev-router/examples/claude-code.env"
 ```
 
 ### Persistent settings.json
@@ -278,7 +278,7 @@ The profile is [`examples/codex/jev.config.toml`](../examples/codex/jev.config.t
 Both files ship with the package. This does the first two steps:
 
 ```bash
-examples="$(npm root -g)/@ediri/jev-router/examples/codex"
+examples="$(npm root -g)/@simonyost/jev-router/examples/codex"
 mkdir -p ~/.codex
 sed "s#/absolute/path/to/jev-models.json#$examples/jev-models.json#" "$examples/jev.config.toml" \
   > ~/.codex/jev.config.toml
@@ -312,7 +312,7 @@ Session state persists in `~/.local/state/jev-router/sessions.jsonl`, so a resta
 another model.
 
 `jev-router setup` installs the service, and `jev-router uninstall` removes it. This section is the manual route.
-The package ships a template for each system, under `$(npm root -g)/@ediri/jev-router/examples/service/`, and setup
+The package ships a template for each system, under `$(npm root -g)/@simonyost/jev-router/examples/service/`, and setup
 writes its service from the same templates. Both run
 `jev-router serve --ui 4100 --config ~/.config/jev-router/config.json --env-file ~/.config/jev-router/env --log-file ~/.local/state/jev-router/router.log`:
 the router on `http://127.0.0.1:4000`, the live view on `http://127.0.0.1:4100`, your config (so run
@@ -344,7 +344,7 @@ jev-router init                              # writes ~/.config/jev-router/confi
 mkdir -p ~/.config/jev-router ~/Library/Logs/jev-router ~/Library/LaunchAgents
 touch ~/.config/jev-router/env && chmod 600 ~/.config/jev-router/env
 # Put your keys in ~/.config/jev-router/env, one KEY=value per line: TYPESAFE_API_KEY, ...
-plist="$(npm root -g)/@ediri/jev-router/examples/service/launchd/io.github.dirien.jev-router.plist"
+plist="$(npm root -g)/@simonyost/jev-router/examples/service/launchd/io.github.dirien.jev-router.plist"
 path="$(dirname "$(command -v jev-router)"):$(dirname "$(command -v node)"):/usr/bin:/bin"
 sed -e "s|@HOME@|$HOME|g" -e "s|@PATH@|$path|g" "$plist" > ~/Library/LaunchAgents/io.github.dirien.jev-router.plist
 plutil -lint ~/Library/LaunchAgents/io.github.dirien.jev-router.plist
@@ -384,7 +384,7 @@ jev-router init                                # writes ~/.config/jev-router/con
 mkdir -p ~/.config/jev-router ~/.config/systemd/user
 touch ~/.config/jev-router/env && chmod 600 ~/.config/jev-router/env
 # Put your keys in ~/.config/jev-router/env, one KEY=value per line: TYPESAFE_API_KEY, OLLAMA_API_KEY, ...
-unit="$(npm root -g)/@ediri/jev-router/examples/service/systemd/jev-router.service"
+unit="$(npm root -g)/@simonyost/jev-router/examples/service/systemd/jev-router.service"
 path="$(dirname "$(command -v jev-router)"):$(dirname "$(command -v node)"):/usr/bin:/bin"
 sed "s|@PATH@|$path|" "$unit" > ~/.config/systemd/user/jev-router.service
 systemctl --user daemon-reload
@@ -440,7 +440,7 @@ follow [sandbox.md](sandbox.md).
    ```bash
    curl -si http://127.0.0.1:4000/v1/messages \
      -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
-     -d '{"model":"claude-sonnet-5","max_tokens":16,"messages":[{"role":"user","content":"Rename foo to bar in utils.ts"}]}' \
+     -d '{"model":"claude-sonnet-5-5","max_tokens":16,"messages":[{"role":"user","content":"Rename foo to bar in utils.ts"}]}' \
      | grep -iE '^(HTTP/|x-jev-)'
    ```
 
@@ -459,9 +459,9 @@ With real keys, this session exercises each routing rule. Start Claude Code thro
 | 3 | Same session: `Find out why the tests in this project could be flaky and fix the cause.` | `upgrade:jev`, `claude-opus-5-5`, then `sticky` |
 | 4 | Same session: `thanks!` | `jev-keep`: never back down mid-session |
 | 5 | `/clear`, then `Use this key in deploy.sh:` followed by a made-up AWS-style key (`AKIA` plus 16 capital letters or digits) | `secrets: 1` and `trusted_only: true`, served by Anthropic whatever Jev says |
-| 6 | `/model` with another model family than the current one, for example `/model sonnet` | `client-model:sonnet`, `claude-sonnet-5` |
+| 6 | `/model` with another model family than the current one, for example `/model sonnet` | `client-model:sonnet`, `claude-sonnet-5-5` |
 | 7 | `/clear`, then `Tidy up the README #frontier` | `tag`, `claude-opus-5-5` |
-| 8 | Background calls (automatic) | `side-call`, `claude-haiku-4-5` |
+| 8 | Background calls (automatic) | `side-call`, `claude-haiku-5-5` |
 
 If Jev is less than 85% sure that a message is `fast` work, the router takes the more capable of Jev's top two tiers,
 and the reason reads `jev-escalated`. Then run `jev-router report` for the requests, the spend per model, the savings
@@ -518,7 +518,7 @@ For Codex, run `jev-router launch codex` and try two sessions:
   its record, so that running it again after you fix the file finishes the job. Without setup's record, it removes
   only a base URL that points at the router, with the gateway settings that hold exactly setup's values; after
   `setup --no-claude-settings`, it leaves the settings alone. It keeps your config, keys and logs, prints the command
-  that deletes them, and ends with the one that removes jev-router: `npm uninstall -g @ediri/jev-router`. Running it
+  that deletes them, and ends with the one that removes jev-router: `npm uninstall -g @simonyost/jev-router`. Running it
   twice is fine. Like setup, it won't run as root on another user's behalf.
 - **`launch`:** nothing to undo. Plain `claude` and `codex` don't go through the router.
 - **Shell variables:** open a new shell, or run the `unset` line from
@@ -529,5 +529,5 @@ For Codex, run `jev-router launch codex` and try two sessions:
 - **launchd:** run the uninstall commands in [macOS launchd](#macos-launchd).
 - **systemd:** run the uninstall commands in [Linux systemd user unit](#linux-systemd-user-unit).
 - **Docker Sandboxes:** see the teardown in [sandbox.md](sandbox.md#teardown).
-- **Everything:** after the above, `npm uninstall -g @ediri/jev-router`, then
+- **Everything:** after the above, `npm uninstall -g @simonyost/jev-router`, then
   `rm -rf ~/.local/state/jev-router ~/.config/jev-router`, which also deletes your env file.

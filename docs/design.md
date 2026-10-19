@@ -4,6 +4,9 @@ jev-router sits between a coding agent and its model providers and chooses, per 
 does the work. This page explains the rules it follows and the evidence behind each one. Links point to the public
 sources; the numbers in the last sections come from the router's own tests and from its shipped price table.
 
+Current model capabilities and verification limits are recorded in [model support](models.md).
+Historical measurements below retain the models and prices used for those measurements.
+
 ## Decide at human turns, and only move up mid-session
 
 A coding session is mostly machine traffic. After you write one message, the agent runs a tool loop, starts
@@ -29,7 +32,7 @@ but never lower it, for three reasons:
   starting on Opus. Restarting Opus from scratch after Haiku's failed attempt cost $0.90 and solved more tasks.
   Keeping only the file edits and dropping the transcript raised recovery to 64% for Claude and 84% for GPT.
 - **The prompt cache belongs to one model.** A switch starts the next request cold. With the shipped prices, a cache
-  read costs a tenth of fresh input on Sonnet 5 and a twentieth on Opus 5.5, and agent requests are mostly cache
+  read costs a twentieth of fresh input on Sonnet 5.5 and Opus 5.5, and agent requests are mostly cache
   reads.
 - **Signed reasoning doesn't cross providers.** Anthropic thinking blocks carry signatures, and Codex replays
   encrypted reasoning items. Another provider rejects them.

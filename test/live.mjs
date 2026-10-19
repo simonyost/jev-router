@@ -1,8 +1,8 @@
-// Live check against api.anthropic.com with Jev mocked. Three requests, small answers. The first
-// asks for 128000 output tokens, as Claude Code does for Opus 5.5, so it checks that the router caps
-// it at Haiku 4.5's 64000.
+// Live check against api.anthropic.com with Jev mocked. Four bounded requests cover the current
+// Haiku/Sonnet/Opus tiers plus a Haiku tool-loop continuation. No machine settings are changed.
 // Run: npm run test:live   (needs Anthropic credentials: ANTHROPIC_API_KEY, or a proxy that injects them)
 
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateConfig } from '../src/config.mjs';
 import { createRouter } from '../src/router.mjs';
@@ -44,7 +44,7 @@ delete headers('x')['x-api-key'];
  * @param {Record<string, unknown>} [extra]
  */
 const opus = (s, text, extra = {}) => ({
-  ...claudeCodeBody(s, text, { model: 'claude-opus-5-5', maxTokens: 32 }),
+  ...claudeCodeBody(s, text, { model: 'claude-opus-5-5', maxTokens: 256 }),
   thinking: { type: 'adaptive' },
   output_config: { effort: 'high' },
   context_management: { edits: [{ type: 'clear_thinking_20251015', keep: 'all' }] },
@@ -86,7 +86,7 @@ const withSystem = (body) => ({
   messages: [.../** @type {unknown[]} */ (body.messages), { role: 'system', content: 'Answer in one sentence.' }],
 });
 const beta1m = { ...headers(s1), 'anthropic-beta': `${headers(s1)['anthropic-beta']},context-1m-2025-08-07` };
-const first = withSystem(opus(s1, 'What does ls -la print? One sentence.', { max_tokens: 128000 }));
+const first = withSystem(opus(s1, 'What does ls -la print? One sentence.'));
 const lookup = { name: 'Lookup', description: 'Look a thing up', input_schema: { type: 'object', properties: {} } };
 const addition = {
   role: 'system',
@@ -96,14 +96,14 @@ const addition = {
   ],
 };
 await send(
-  '1 haiku, full Claude Code field set, max_tokens 128000, the 1M beta, system messages with a tool addition',
+  '1 Haiku 5.5, full Claude Code field set, the 1M beta, system messages with a tool addition',
   { ...first, messages: [.../** @type {unknown[]} */ (first.messages), addition] },
   beta1m,
 );
 const loop = {
   ...claudeCodeToolTurn(s1, 'What does ls -la print? One sentence.'),
   model: 'claude-opus-5-5',
-  max_tokens: 32,
+  max_tokens: 256,
   thinking: { type: 'adaptive' },
   output_config: { effort: 'high' },
   context_management: { edits: [{ type: 'clear_thinking_20251015', keep: 'all' }] },
@@ -112,11 +112,23 @@ await send('2 haiku, tool-loop turn (sticky)', loop, headers(s1));
 plan.option = 'routine';
 const s2 = crypto.randomUUID();
 await send(
-  '3 sonnet 5, full field set, a system message after the prompt',
+  '3 Sonnet 5.5, full field set, a system message after the prompt',
   withSystem(opus(s2, 'Add a unit test for the parser. Reply with one word.')),
   headers(s2),
 );
+plan.option = 'complex';
+const s3 = crypto.randomUUID();
+await send('4 Opus 5.5, adaptive thinking and streaming', opus(s3, 'Reply with one word: ready.'), headers(s3));
 console.log(JSON.stringify(results, null, 2));
-console.log('jev mock calls:', jev.calls.length, '(expect 2)');
+console.log('jev mock calls:', jev.calls.length, '(expect 3)');
 await close(server);
 await jev.close();
+for (const result of results) {
+  assert.equal(result.status, 200, `${result.label}: ${result.error ?? 'upstream error'}`);
+  assert.equal(result.sha_match, true, `${result.label}: response stream changed`);
+}
+assert.deepEqual(
+  results.map((result) => result.model),
+  ['claude-haiku-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'],
+);
+assert.equal(jev.calls.length, 3);

@@ -16,6 +16,40 @@
 
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 
+/** @type {WeakMap<Usage, { complete: boolean, cacheWrite5m?: number, cacheWrite1h?: number }>} */
+const pricingDetails = new WeakMap();
+
+/** @param {unknown} value */
+function tokenCount(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * @param {RawUsage} u
+ * @param {boolean} responsesApi
+ * @param {number} cached
+ * @param {number} cacheWrite
+ * @param {{ ephemeral_5m_input_tokens?: number, ephemeral_1h_input_tokens?: number } | undefined} split
+ */
+function completeUsage(u, responsesApi, cached, cacheWrite, split) {
+  const extra =
+    /** @type {RawUsage & { server_tool_use?: Record<string, number>, iterations?: unknown[], inference_geo?: string | null }} */ (u);
+  return (
+    tokenCount(u.input_tokens) &&
+    tokenCount(u.output_tokens) &&
+    tokenCount(cached) &&
+    tokenCount(cacheWrite) &&
+    (!responsesApi || cached <= (u.input_tokens ?? -1)) &&
+    (!split ||
+      ((split.ephemeral_5m_input_tokens === undefined || tokenCount(split.ephemeral_5m_input_tokens)) &&
+        (split.ephemeral_1h_input_tokens === undefined || tokenCount(split.ephemeral_1h_input_tokens)) &&
+        (split.ephemeral_5m_input_tokens ?? 0) + (split.ephemeral_1h_input_tokens ?? 0) === cacheWrite)) &&
+    !Object.values(extra.server_tool_use ?? {}).some((count) => count > 0) &&
+    (!extra.inference_geo || extra.inference_geo === 'global') &&
+    !extra.iterations?.length
+  );
+}
+
 /** Collects the usage of one upstream response from the chunks the router relays. */
 export class UsageTap {
   /** @param {string} [contentType] the response's content-type */
@@ -28,6 +62,9 @@ export class UsageTap {
     this.raw = {};
     /** @type {string | undefined} */
     this.model = undefined;
+    this.terminal = false;
+    this.terminalResponse = false;
+    this.finalUsage = false;
   }
 
   /**
@@ -62,12 +99,27 @@ export class UsageTap {
     /** @type {UsageEvent} */
     const event = parsed;
     if (event.type === 'message_start') {
+      this.terminal = false;
+      this.terminalResponse = false;
+      this.finalUsage = false;
       this.model = event.message?.model;
       Object.assign(this.raw, event.message?.usage);
-    } else if (event.type === 'message_delta') Object.assign(this.raw, event.usage);
-    else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+    } else if (event.type === 'message_delta') {
+      this.terminal = false;
+      if (tokenCount(event.usage?.output_tokens)) this.finalUsage = true;
+      Object.assign(this.raw, event.usage);
+    } else if (event.type === 'message_stop') {
+      this.terminal = true;
+      this.terminalResponse = false;
+    } else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+      this.terminal = true;
+      this.terminalResponse = true;
       this.model = event.response?.model;
       Object.assign(this.raw, event.response?.usage);
+    } else if (event.type === 'error') {
+      this.terminal = false;
+      this.terminalResponse = false;
+      this.finalUsage = false;
     }
   }
 
@@ -90,12 +142,28 @@ export class UsageTap {
     if (u.input_tokens === undefined && u.output_tokens === undefined) return undefined;
     const cached = u.cache_read_input_tokens ?? u.input_tokens_details?.cached_tokens ?? 0;
     const responsesApi = u.input_tokens_details !== undefined;
-    return {
+    /** @type {{ ephemeral_5m_input_tokens?: number, ephemeral_1h_input_tokens?: number } | undefined} */
+    const split =
+      /** @type {RawUsage & { cache_creation?: { ephemeral_5m_input_tokens?: number, ephemeral_1h_input_tokens?: number } }} */ (u)
+        .cache_creation;
+    const cacheWrite =
+      u.cache_creation_input_tokens ?? (split ? (split.ephemeral_5m_input_tokens ?? 0) + (split.ephemeral_1h_input_tokens ?? 0) : 0);
+    const usage = {
       input: Math.max(0, (u.input_tokens ?? 0) - (responsesApi ? cached : 0)),
       cacheRead: cached,
-      cacheWrite: u.cache_creation_input_tokens ?? 0,
+      cacheWrite,
       output: u.output_tokens ?? 0,
     };
+    pricingDetails.set(usage, {
+      complete:
+        (!this.sse || (this.terminal && (this.terminalResponse || this.finalUsage))) &&
+        completeUsage(u, responsesApi, cached, cacheWrite, split),
+      ...(split && {
+        cacheWrite5m: split.ephemeral_5m_input_tokens ?? 0,
+        cacheWrite1h: split.ephemeral_1h_input_tokens ?? 0,
+      }),
+    });
+    return usage;
   }
 }
 
@@ -104,13 +172,28 @@ export class UsageTap {
  * @param {string} model
  * @param {Usage | undefined} usage
  * @param {Record<string, Price>} prices USD per million tokens, by model
+ * @param {{ unpricedModifiers?: boolean }} [options] true when request features require rates this table cannot calculate
  * @returns {number | undefined} undefined for a model without a price, or a response without usage
  */
-export function costOf(model, usage, prices) {
-  if (!usage || !model) return undefined;
+export function costOf(model, usage, prices, options = {}) {
+  if (!usage || !model || options.unpricedModifiers) return undefined;
   const p = prices[model] ?? prices[model.replace(/-\d{8}$/, '')];
   if (!p) return undefined;
+  if (![usage.input, usage.cacheRead, usage.cacheWrite, usage.output].every(tokenCount)) return undefined;
+  const details = pricingDetails.get(usage);
+  if (details && !details.complete) return undefined;
+  const totalInput = usage.input + usage.cacheRead + usage.cacheWrite;
+  const rate = p.longContext && totalInput > p.longContext.aboveInputTokens ? p.longContext : p;
+  if (usage.cacheWrite && details && details.cacheWrite5m === undefined && details.cacheWrite1h === undefined) return undefined;
+  const cacheWrite5m = details?.cacheWrite5m ?? usage.cacheWrite;
+  const cacheWrite1h = details?.cacheWrite1h ?? 0;
+  if (cacheWrite1h && rate.cacheWrite1h === undefined) return undefined;
   const usd =
-    (usage.input * p.in + usage.cacheRead * (p.cacheRead ?? p.in) + usage.cacheWrite * (p.cacheWrite ?? p.in) + usage.output * p.out) / 1e6;
+    (usage.input * rate.in +
+      usage.cacheRead * (rate.cacheRead ?? rate.in) +
+      cacheWrite5m * (rate.cacheWrite ?? rate.in) +
+      cacheWrite1h * (rate.cacheWrite1h ?? rate.in) +
+      usage.output * rate.out) /
+    1e6;
   return Math.round(usd * 1e6) / 1e6;
 }

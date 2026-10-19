@@ -45,6 +45,7 @@ import {
 import { jevOptionsAnswer, json } from './helpers.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const INSTALL_ROOT = ROOT.replace(/\/$/, '');
 const FAKE_SERVICE = fileURLToPath(new URL('./fakes/fake-service.mjs', import.meta.url));
 const FAKE_NPM = fileURLToPath(new URL('./fakes/fake-npm.mjs', import.meta.url));
 const REDIRECT = fileURLToPath(new URL('./fakes/jev-redirect.mjs', import.meta.url));
@@ -124,7 +125,7 @@ test('setup asks for the models and a Jev key, checks the key, runs the router a
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.stdout, '');
   for (const text of [
-    'Which models should Claude Code use?\n  1. Claude only: Haiku 4.5, Sonnet 5 and Opus 5.5. You need a Jev key.\n',
+    'Which models should Claude Code use?\n  1. Claude only: Haiku 5.5, Sonnet 5.5 and Opus 5.5. You need a Jev key.\n',
     'Choose 1, 2 or 3 [1]: \n',
     'TypeSafe API key (press Enter to use an OpenRouter key instead): \n',
     'Checking the TypeSafe key with one Jev call (about $0.00003)... it works (typesafe answered in ',
@@ -327,7 +328,7 @@ test('setup --models fable writes the Fable config, and a second run switches an
   const box = await setupBox();
   const fable = await setup(box, ['--yes', '--service', 'systemd', '--models', 'fable'], { env: { TYPESAFE_API_KEY: GOOD } });
   assert.equal(fable.code, 0, fable.stderr);
-  assert.match(fable.stderr, /^Models: Claude only, with Fable 5\.1 for deep work: Haiku 4\.5, Sonnet 5, Opus 5\.5 and Fable 5\.1\.$/m);
+  assert.match(fable.stderr, /^Models: Claude only, with Fable 5\.1 for deep work: Haiku 5\.5, Sonnet 5\.5, Opus 5\.5 and Fable 5\.1\.$/m);
   assert.match(fable.stderr, new RegExp(`^Wrote ${box.configFile} \\(Claude only, with Fable 5\\.1 for deep work: `, 'm'));
   assert.equal(readFileSync(box.configFile, 'utf8'), readFileSync(ANTHROPIC_FABLE_CONFIG, 'utf8'));
   assert.deepEqual(await startedTiers(box), ['fast', 'balanced', 'frontier', 'max'], 'the service runs it');
@@ -337,7 +338,7 @@ test('setup --models fable writes the Fable config, and a second run switches an
   assert.ok(kept.stderr.includes('Which models should Claude Code use? Enter keeps the ones you have.\n'), kept.stderr);
   assert.ok(
     kept.stderr.includes(
-      '  2. Claude only, with Fable 5.1 for deep work: Haiku 4.5, Sonnet 5, Opus 5.5 and Fable 5.1. You need a Jev key.\n',
+      '  2. Claude only, with Fable 5.1 for deep work: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1. You need a Jev key.\n',
     ),
   );
   assert.ok(kept.stderr.includes('Choose 1, 2 or 3 [2]: \n'), 'Enter keeps the Fable config');
@@ -623,7 +624,7 @@ test('uninstall stops the service and takes back what setup changed, restoring w
     new RegExp(`Kept your config, keys and logs:\\n {2}${box.config}/jev-router\\n {2}${box.state}/jev-router\\n`),
   );
   assert.match(removed.stderr, /To delete them too: rm -rf \S+config\/jev-router \S+state\/jev-router\n/);
-  assert.match(removed.stderr, /Last step, to remove the jev-router command: npm uninstall -g @ediri\/jev-router\n$/);
+  assert.match(removed.stderr, /Last step, to remove the jev-router command: npm uninstall -g @simonyost\/jev-router\n$/);
   assert.ok(existsSync(box.envFile), 'the keys stay');
 
   const again = await run(['uninstall'], box.env);
@@ -689,9 +690,9 @@ test('without a manifest, uninstall removes only a base URL that points at the r
  */
 function npxCopy(box, spec) {
   const npx = join(box.root, 'npm-cache', '_npx', '5e7a9d1c');
-  const pkg = join(npx, 'node_modules', '@ediri', 'jev-router');
+  const pkg = join(npx, 'node_modules', '@simonyost', 'jev-router');
   for (const dir of ['bin', 'src', 'config', 'examples', 'ui']) cpSync(join(ROOT, dir), join(pkg, dir), { recursive: true });
-  writeFileSync(join(npx, 'package.json'), JSON.stringify({ dependencies: { '@ediri/jev-router': spec } }));
+  writeFileSync(join(npx, 'package.json'), JSON.stringify({ dependencies: { '@simonyost/jev-router': spec } }));
   mkdirSync(join(npx, 'node_modules', '.bin'));
   symlinkSync(join(pkg, 'bin', 'jev-router.mjs'), join(npx, 'node_modules', '.bin', 'jev-router'));
   const prefix = join(box.root, 'global');
@@ -722,18 +723,16 @@ test('run through npx, setup installs jev-router with npm before it installs the
   assert.equal(declined.code, 0, declined.stderr);
   assert.match(
     declined.stderr,
-    new RegExp(
-      `The background service needs a copy of jev-router that stays put, and npm can delete its npx cache at any time\\.\\nInstall it now with: npm install -g @ediri/jev-router@${VERSION.replaceAll('.', '\\.')}\\? \\[Y/n\\] n\\n`,
-    ),
+    /The background service needs a copy of jev-router that stays put, and npm can delete its npx cache at any time\.\nInstall it now with: npm install -g 'github:simonyost\/jev-router#main'\? \[Y\/n\] n\n/,
   );
-  assert.match(declined.stderr, /Start Claude Code through the router with: npx @ediri\/jev-router launch claude\n/);
-  assert.match(declined.stderr, /Check it: npx @ediri\/jev-router doctor\n/);
+  assert.match(declined.stderr, /Start Claude Code through the router with: npx 'github:simonyost\/jev-router#main' launch claude\n/);
+  assert.match(declined.stderr, /Check it: npx 'github:simonyost\/jev-router#main' doctor\n/);
   assert.deepEqual(copy.npm(), [], 'no global install without a yes');
   assert.ok(!existsSync(box.unit));
 
   const accepted = await setup(box, ['--yes', '--service', 'systemd'], { env: copy.env, bin: copy.bin });
   assert.equal(accepted.code, 0, accepted.stderr);
-  assert.deepEqual(copy.npm(), [['install', '-g', `@ediri/jev-router@${VERSION}`]]);
+  assert.deepEqual(copy.npm(), [['install', '-g', 'github:simonyost/jev-router#main']]);
   assert.match(
     readFileSync(box.unit, 'utf8'),
     new RegExp(`^Environment="PATH=${copy.prefix}/bin:`, 'm'),
@@ -748,12 +747,12 @@ test('run through npx, setup installs jev-router with npm before it installs the
 
 test('npx specs: a git spec is installed as npx recorded it, and a file spec as an absolute path', async () => {
   for (const [spec, installs, hint] of [
-    ['github:dirien/jev-router#semver:^1', 'github:dirien/jev-router#semver:^1', "npx 'github:dirien/jev-router#semver:^1'"],
+    ['github:dirien/jev-router#semver:^1', 'github:simonyost/jev-router#main', "npx 'github:simonyost/jev-router#main'"],
     ['file:../../../ediri-jev-router-1.5.0.tgz', null, null],
   ]) {
     const box = await setupBox({ tools: ['systemctl', 'npm'], installed: false });
     const copy = npxCopy(box, /** @type {string} */ (spec));
-    const tarball = join(box.root, 'ediri-jev-router-1.5.0.tgz');
+    const tarball = join(realpathSync(box.root), 'ediri-jev-router-1.5.0.tgz');
     const result = await setup(box, ['--yes', '--service', 'none'], { env: { ...copy.env, TYPESAFE_API_KEY: GOOD }, bin: copy.bin });
     assert.equal(result.code, 0, result.stderr);
     assert.ok(
@@ -773,7 +772,7 @@ test('run through npx, a failed npm install -g says to run the same npx command 
   const failed = await setup(box, ['--yes', '--service', 'systemd'], { env, bin: copy.bin });
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /The install failed: npm exited with 1\./);
-  assert.match(failed.stderr, /run setup again \(npx @ediri\/jev-router setup\) and it picks up from here\.\n$/);
+  assert.match(failed.stderr, /run setup again \(npx 'github:simonyost\/jev-router#main' setup\) and it picks up from here\.\n$/);
   assert.ok(existsSync(box.envFile) && !existsSync(box.unit) && !existsSync(box.settings));
 });
 
@@ -782,7 +781,7 @@ test('with jev-router nowhere on PATH, a service needs a global install; decline
   const result = await setup(box, ['--service', 'systemd'], { input: `\n${GOOD}\n\nn\n` });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stderr, /The background service needs jev-router installed, and there's none on your PATH\.\n/);
-  assert.match(result.stderr, /you chose not to install one \(npm install -g @ediri\/jev-router@/);
+  assert.ok(result.stderr.includes(`you chose not to install one (npm install -g ${INSTALL_ROOT})`));
   assert.ok(result.stderr.includes(`Start Claude Code through the router with: ${BIN} launch claude\n`));
 });
 
@@ -793,14 +792,11 @@ test('with jev-router nowhere on PATH, setup installs it with npm; a copy outsid
   const result = await setup(box, ['--yes', '--service', 'systemd'], { env: npm });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stderr, /The background service needs jev-router installed, and there's none on your PATH\.\n/);
-  assert.match(
-    result.stderr,
-    new RegExp(`Installing jev-router for good: npm install -g @ediri/jev-router@${VERSION.replaceAll('.', '\\.')}\\n`),
-  );
+  assert.ok(result.stderr.includes(`Installing jev-router for good: npm install -g ${INSTALL_ROOT}\n`));
   assert.ok(result.stderr.includes(`note: npm put jev-router in ${prefix}/bin, which isn't on your PATH.`));
   assert.ok(result.stderr.includes(`Check it: ${prefix}/bin/jev-router doctor\n`), 'the hints name the command by its path');
   assert.deepEqual(readFileSync(npm.FAKE_NPM_LOG, 'utf8').trim().split('\n'), [
-    JSON.stringify(['install', '-g', `@ediri/jev-router@${VERSION}`]),
+    JSON.stringify(['install', '-g', INSTALL_ROOT]),
     JSON.stringify(['prefix', '-g']),
   ]);
   assert.match(readFileSync(box.unit, 'utf8'), new RegExp(`^Environment="PATH=${prefix}/bin:`, 'm'));
@@ -828,7 +824,7 @@ test('when npm install -g fails, setup installs no service, keeps the keys, and 
   assert.match(
     failed.stderr,
     new RegExp(
-      `Node from a version manager \\(nvm, fnm, or Homebrew on a Mac\\).*npm config set prefix ~/\\.local.*sudo npm install -g @ediri/jev-router@${VERSION.replaceAll('.', '\\.')}\\n`,
+      `Node from a version manager \\(nvm, fnm, or Homebrew on a Mac\\).*npm config set prefix ~/\\.local.*sudo npm install -g ${INSTALL_ROOT.replaceAll('/', '\\/')}\\n`,
     ),
   );
   assert.ok(failed.stderr.includes(`run setup again (${BIN} setup) and it picks up from here.\n`));
@@ -843,7 +839,7 @@ test('when npm install -g fails, setup installs no service, keeps the keys, and 
   assert.equal(owned.code, 1);
   assert.match(
     owned.stderr,
-    /were called @dirien\/jev-router, and npm won't replace their command\. Remove it first:\n {2}npm uninstall -g @dirien\/jev-router\n/,
+    /older releases used @dirien\/jev-router; the upstream package used @ediri\/jev-router\)\. Remove the existing package first:\n {2}npm uninstall -g @dirien\/jev-router\n {2}npm uninstall -g @ediri\/jev-router\n/,
   );
 });
 

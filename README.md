@@ -33,15 +33,16 @@ that model. `jev-router setup` runs the router in the background, so you don't h
 Two commands set it up:
 
 ```bash
-npx @ediri/jev-router setup
+npx github:simonyost/jev-router#main setup
 claude
 ```
 
-npx asks before it downloads the package. You can also install jev-router first, with
-`npm install -g @ediri/jev-router`, and then run `jev-router setup`. To run it from GitHub instead of the npm
-registry, use `npx github:dirien/jev-router setup`, which needs git.
+This fork installs from GitHub and needs git. You can also install it first with
+`npm install -g github:simonyost/jev-router#main`, then run `jev-router setup`.
+The package identity is `@simonyost/jev-router`; it has not been published to npm.
+Upstream is [dirien/jev-router](https://github.com/dirien/jev-router); Apache-2.0 attribution is retained.
 
-Don't run `npx jev-router` or `npm install -g jev-router`. Without the `@ediri/` scope, that name belongs to an
+Don't run `npx jev-router` or `npm install -g jev-router`. That unscoped name belongs to an
 unrelated project, [gargpratyush/jev-router](https://github.com/gargpratyush/jev-router). Run setup as your own user,
 not with `sudo`: it sets up jev-router for the user who runs it, and refuses to run as root for someone else.
 
@@ -49,7 +50,7 @@ not with `sudo`: it sets up jev-router for the user who runs it, and refuses to 
 
 Setup asks three questions:
 
-1. **Which models Claude Code uses.** The default is Claude only: Haiku 4.5, Sonnet 5 and Opus 5.5. The second
+1. **Which models Claude Code uses.** The default is Claude only: Haiku 5.5, Sonnet 5.5 and Opus 5.5. The second
    option adds Fable 5.1 for deep work, as a fourth tier called `max`. The third sends quick work to Ollama Cloud's
    `glm-5.3-flash`.
 1. **Your keys.** Jev needs a key from [TypeSafe](https://console.typesafe.ai) or [OpenRouter](https://openrouter.ai).
@@ -77,7 +78,7 @@ the router back out of Claude Code's settings.
 - **Check it:** `jev-router doctor` lists the config, the keys, the service, and whether the router answers.
 - **Watch it:** open <http://127.0.0.1:4100>. Each message you write shows up with the model the router picked, and
   why.
-- **Upgrade:** `npx @ediri/jev-router@latest setup` installs the newest version and restarts the router.
+- **Upgrade:** reinstall globally, then run setup: `npm install -g github:simonyost/jev-router#main && jev-router setup`.
 - **Undo it:** `jev-router uninstall` stops the router and takes setup's changes back out of Claude Code's settings.
   It keeps your config, keys and logs, and prints the command that deletes them.
 
@@ -87,7 +88,7 @@ Setup can't install a service on a machine without launchd or a systemd user ses
 and when you answer no, it saves your keys and stops. Then start Claude Code through the router for one session:
 
 ```bash
-jev-router launch claude              # through npx: npx @ediri/jev-router launch claude
+jev-router launch claude              # through npx: npx github:simonyost/jev-router#main launch claude
 jev-router launch claude --ui 4100    # the same, with the live view on http://127.0.0.1:4100
 ```
 
@@ -96,19 +97,21 @@ the way you installed jev-router.
 
 To run each step yourself instead, see [Manual setup](docs/activation.md#manual-setup).
 
+See [model support, pricing sources, upgrades and rollback](docs/models.md).
+
 ## Tiers
 
 | Client | `fast` | `balanced` | `frontier` | `max` | `trusted` (sessions that contained a secret) |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code, setup's default (Claude only) | Anthropic `claude-haiku-4-5` | Anthropic `claude-sonnet-5` | Anthropic `claude-opus-5-5` | none | Anthropic `claude-sonnet-5` |
-| Claude Code, setup's Fable option | Anthropic `claude-haiku-4-5` | Anthropic `claude-sonnet-5` | Anthropic `claude-opus-5-5` | Anthropic `claude-fable-5-1` | Anthropic `claude-sonnet-5` |
-| Claude Code, setup's Ollama option | Ollama Cloud `glm-5.3-flash` | Anthropic `claude-sonnet-5` | Anthropic `claude-opus-5-5` | none | Anthropic `claude-sonnet-5` |
+| Claude Code, setup's default (Claude only) | Anthropic `claude-haiku-5-5` | Anthropic `claude-sonnet-5-5` | Anthropic `claude-opus-5-5` | none | Anthropic `claude-sonnet-5-5` |
+| Claude Code, setup's Fable option | Anthropic `claude-haiku-5-5` | Anthropic `claude-sonnet-5-5` | Anthropic `claude-opus-5-5` | Anthropic `claude-fable-5-1` | Anthropic `claude-sonnet-5-5` |
+| Claude Code, setup's Ollama option | Ollama Cloud `glm-5.3-flash` | Anthropic `claude-sonnet-5-5` | Anthropic `claude-opus-5-5` | none | Anthropic `claude-sonnet-5-5` |
 | Codex CLI | Ollama Cloud `glm-5.3-flash` | Ollama Cloud `kimi-k2.7-code` | OpenAI `gpt-6-astra` | OpenAI `gpt-6-astra`, with the Fable option | OpenAI `gpt-6-sol` |
 
 Setup's default writes [`config/anthropic-only.json`](config/anthropic-only.json) to
 `~/.config/jev-router/config.json`. The Ollama option writes [`config/default.json`](config/default.json) instead,
 which changes only Claude Code's `fast` tier; the router also uses that file when you have no config. Claude Code's
-own background calls (session titles, topic checks, quota probes) go to `claude-haiku-4-5` in all three. The OpenAI
+own background calls (session titles, topic checks, quota probes) go to `claude-haiku-5-5` in all three. The OpenAI
 model names come from Codex's bundled model catalog, so check them against your account.
 
 The Fable option writes [`config/anthropic-fable.json`](config/anthropic-fable.json): the Claude-only config plus
@@ -124,16 +127,14 @@ routes like the Claude-only one. Codex has no model above `gpt-6-astra` here, so
 The [Quick start](#quick-start) installs jev-router for you. To install it yourself, or to pin a version:
 
 ```bash
-npm install -g @ediri/jev-router                     # the newest release
-npm install -g @ediri/jev-router@1.6.0               # one release
-npm install -g github:dirien/jev-router#semver:^1    # the newest 1.x from GitHub, which needs git
+npm install -g github:simonyost/jev-router#main           # current fork
+npm install -g github:simonyost/jev-router#<commit-sha>   # reproducible revision
 ```
 
 To update, run the install command again.
 
-Up to 1.4.0 the package was called `@dirien/jev-router`. If you installed one of those versions, run
-`npm uninstall -g @dirien/jev-router` before you install a newer one: npm won't replace a command that another
-package owns.
+If an upstream `@ediri/jev-router` or older `@dirien/jev-router` install owns the command,
+uninstall that package before installing this fork. See [migration and rollback](docs/models.md#migration-and-rollback).
 
 What else you need:
 
@@ -147,7 +148,7 @@ What else you need:
 | Claude Code | 2.1.273 or newer, for the gateway hint headers (request shapes taken from 2.1.281) |
 | Codex CLI | 0.134.0 or newer, for profile files (request shapes taken from 0.156.1) |
 
-To remove jev-router, run `jev-router uninstall`, then `npm uninstall -g @ediri/jev-router`. Your config, keys and
+To remove jev-router, run `jev-router uninstall`, then `npm uninstall -g @simonyost/jev-router`. Your config, keys and
 session state stay in `~/.config/jev-router` and `~/.local/state/jev-router` until you delete them.
 
 ## Use it with Claude Code
@@ -282,7 +283,7 @@ The router tracks each conversation as a **session**. It takes the session ID fr
 | Request | Tier | Asks Jev? |
 | --- | --- | --- |
 | `count_tokens` | The session's tier. A target with `countTokens: false` (Ollama Cloud) answers with a local 404, and Claude Code estimates instead | no |
-| Background call: request class `auxiliary`, Codex memory consolidation, a `max_tokens <= 1` probe, or a `haiku` model when no request class is sent | `side`: `claude-haiku-4-5` for Claude Code, the `fast` target for Codex | no |
+| Background call: request class `auxiliary`, Codex memory consolidation, a `max_tokens <= 1` probe, or a `haiku` model when no request class is sent | `side`: `claude-haiku-5-5` for Claude Code, the `fast` target for Codex | no |
 | Subagent, compaction, workflow | The session's tier | no |
 | `x-jev-tier` header or `JEV_ROUTER_TIER` | That tier | no |
 | `/model` switch to another model family in Claude Code | The family's tier from `modelPins` | no |
@@ -331,6 +332,9 @@ None of these can move a session that contained a secret to an untrusted upstrea
 [docs/design.md](docs/design.md) explains why the router works this way, with sources.
 
 ## How it compares
+
+The following comparison records upstream 1.6.0 on 2026-09-25. Its Haiku 4.5 live results do not verify
+the fork's current Haiku 5.5 defaults.
 
 [docs/comparison.md](docs/comparison.md) compares jev-router in detail with four other projects that route coding
 agents with Jev, and lists a few more it didn't test. Its summary:
@@ -587,7 +591,7 @@ built-in coverage.
 | `npm run test:coverage` | The tests with coverage thresholds on `src/**`: lines 85%, branches 75%, functions 85% |
 | `npm run check` | `lint`, `typecheck`, `lint:md` and `test:coverage`, the gate CI runs |
 | `npm run test:package` | Packs the package, installs it with `npm install -g --prefix` into a temporary directory, and runs `version`, `init`, `serve` with an env file and the live view, `env claude`, `launch claude`, a clean `SIGTERM`, then `setup --yes --service none` against a local Jev stand-in, and `uninstall`, with no network. `-- --git` also installs the last commit from git |
-| `npm run test:live` | Three live Anthropic calls with Jev mocked; needs Anthropic credentials |
+| `npm run test:live` | Four bounded live Anthropic calls with Jev mocked; needs Anthropic credentials |
 | `npm run eval` / `npm run eval:mock` | The Jev evaluation on 58 labeled prompts, live or with a keyword stand-in |
 | `npm start` | Starts the router (`jev-router serve`) |
 
@@ -630,7 +634,8 @@ kit, and later the npm package. [docs/releasing.md](docs/releasing.md) has the s
 
 ## Status
 
-The current release is 1.6.0. The offline suite has 176 tests against mock upstreams and a mock Jev, and the package
+The fork is based on upstream 1.6.0. Current Claude 5.5 support is checked against official documentation
+and deterministic mocks; it has not been verified live. The offline suite uses mock upstreams and a mock Jev; the package
 smoke test installs the packed package and runs it the way a user would.
 
 Live checks on 2026-09-24 ran Claude Code 2.1.281 through the router against Anthropic and found six problems, listed

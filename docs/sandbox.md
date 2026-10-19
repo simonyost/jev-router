@@ -8,7 +8,7 @@ and it covers only what changes in a sandbox:
 | | On your machine | In a Docker Sandbox |
 | --- | --- | --- |
 | Keys | `~/.config/jev-router/env`, which `jev-router setup` writes | Stored on the host with `sbx secret set`. The kit declares them, and the sandbox proxy adds them to outgoing requests, so they never enter the sandbox |
-| Install | `npx github:dirien/jev-router setup`, or `npm install -g github:dirien/jev-router#semver:^1` | The `npm install -g` command, inside the sandbox |
+| Install | `npx github:simonyost/jev-router#main setup`, or `npm install -g github:simonyost/jev-router#main` | The `npm install -g` command, inside the sandbox |
 | Router | A launchd or systemd service that `jev-router setup` installs | `jev-router serve --ui 0.0.0.0:4100`, inside the sandbox |
 | Live view | `http://127.0.0.1:4100` | The same address, once `sbx ports` forwards it to the host |
 | Claude Code settings | `~/.claude/settings.json`, which `jev-router setup` writes | `-e` options of `sbx run` |
@@ -91,7 +91,7 @@ placeholder=proxy-managed                                            # what the 
 for u in https://api.typesafe.ai/v1/models https://openrouter.ai/api/v1/key https://ollama.com/api/ps https://api.openai.com/v1/models; do
   printf '%s  %s\n' "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $placeholder" "$u")" "$u"
 done                                                                 # 200: the key is injected; 401: it isn't
-npm install -g github:dirien/jev-router#semver:^1                   # not run yet in a sandbox
+npm install -g github:simonyost/jev-router#main                   # not run yet in a sandbox
 jev-router init                                                      # writes ~/.config/jev-router/config.json
 jev-router doctor
 ```
